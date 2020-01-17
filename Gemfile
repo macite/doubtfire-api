@@ -4,7 +4,7 @@ source 'https://rubygems.org'
 ruby_versions = {
   development:  '~>2.6',
   test:         '~>2.6',
-  staging:      '~>2.3.1',
+  staging:      '~>2.6',
   production:   '~>2.3.1'
 }
 # Get the ruby version for the current enviornment
@@ -16,6 +16,7 @@ gem 'rails', '6.0.0'
 group :development, :test do
   gem 'database_cleaner'
   gem 'byebug'
+  gem 'factory_bot_rails'
   gem 'simplecov', require: false
   gem 'pg'
   gem 'hirb'
@@ -28,7 +29,8 @@ end
 group :development, :test, :staging do
   # Generators for population
   gem 'populator'
-  gem 'factory_girl_rails'
+  gem "factory_bot"
+  gem 'factory_bot_rails'
   gem 'faker', '~>1.9.1'
   gem "minitest-rails", github: "blowmage/minitest-rails"
 end
