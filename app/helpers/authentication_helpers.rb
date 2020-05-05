@@ -16,16 +16,18 @@ module AuthenticationHelpers
   # Reads details from the params fetched from the caller context.
   #
   def authenticated?
+    logger.info "Header: #{headers["Auth-Token"]}"
     # Check warden -- authenticate using DB or LDAP etc.
     return true if warden.authenticated?
 
     # Check for auth token parameter
-    if params.present? && params[:auth_token].present?
+    if headers["Auth-Token"].present?
       # Get the token and the user - if there is a token
-      token = AuthToken.find_by_auth_token(params[:auth_token])
+      token = AuthToken.find_by_auth_token(headers["Auth-Token"])
       user_by_token = token.user unless token.nil?
     end
 
+    # NEED TO VALIDATE USERNAME WITH AUTH TOKEN?
     # Check user by token
     if user_by_token.present?
       # Non-expired token
@@ -45,7 +47,7 @@ module AuthenticationHelpers
   # Get the current user either from warden or from the token
   #
   def current_user
-    warden.user || AuthToken.user_for_token(params[:auth_token])
+    warden.user || AuthToken.user_for_token(headers["Auth-Token"])
   end
 
   #
@@ -55,11 +57,17 @@ module AuthenticationHelpers
   def add_auth_to(service)
     service.routes.each do |route|
       options = route.instance_variable_get('@options')
-      next if options[:params]['auth_token']
-      options[:params]['auth_token'] = {
+      next if options[:params]['username']
+      options[:params]['username'] = {
         required: true,
         type:     'String',
-        desc:     'Authentication token'
+        desc:     'Username'
+      }
+      options[:params]['auth_token'] = {
+        required: true,
+        in:     'header',
+        type:   'String',
+        desc:   'Authentication token'
       }
     end
   end

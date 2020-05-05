@@ -69,7 +69,7 @@ module Api
         end
 
         # Return user details
-        { 
+        {
           user: UserSerializer.new(user),
           auth_token: user.generate_authentication_token!(remember).auth_token
         }
@@ -154,7 +154,7 @@ module Api
         # Must redirect to the front-end after sign in
         protocol = Rails.env.development? ? 'http' : 'https'
         host = Rails.env.development? ? 'localhost:8000' : Doubtfire::Application.config.institution[:host]
-        redirect "#{protocol}://#{host}/#sign_in?authToken=#{user.auth_token}"
+        redirect "#{protocol}://#{host}/#sign_in?username=#{user.username}"
       end
 
       #
@@ -162,17 +162,17 @@ module Api
       #
       desc 'Get user details from an authentication token'
       params do
-        requires :auth_token, type: String, desc: 'The user\'s temporary auth token'
+        requires :auth_token, in:header, type: String, desc: 'The user\'s temporary auth token'
       end
       post '/auth' do
-        error!({ error: 'Invalid token.' }, 404) if params[:auth_token].nil?
+        error!({ error: 'Invalid token.' }, 404) if headers["Auth-Token"].nil?
         logger.info "Get user via auth_token from #{request.ip}"
 
         # Authenticate that the token is okay
         if authenticated?
-          token = AuthToken.find_by_auth_token(params[:auth_token])
+          token = AuthToken.find_by_auth_token(headers["Auth-Token"])
           error!({ error: 'Invalid token.' }, 404) if token.nil?
-          
+
           user = token.user
 
           # Invalidate the token and regenrate a new one
@@ -219,11 +219,11 @@ module Api
       optional :remember, type: Boolean, desc: 'User has requested to remember login', default: false
     end
     put '/auth/:auth_token' do
-      error!({ error: 'Invalid token.' }, 404) if params[:auth_token].nil?
+      error!({ error: 'Invalid token.' }, 404) if headers["Auth-Token"].nil?
       logger.info "Update token #{params[:username]} from #{request.ip}"
 
       # Find user
-      token = AuthToken.find_by_auth_token(params[:auth_token])
+      token = AuthToken.find_by_auth_token(headers["Auth-Token"])
       user = token.user unless token.nil?
       remember = params[:remember] || false
 
@@ -234,10 +234,10 @@ module Api
         if token.auth_token_expiry > Time.zone.now
           token.extend_token remember
         end
-        
+
         # Return extended auth token
-        { 
-          auth_token: user.auth_token 
+        {
+          auth_token: user.auth_token
         }
       end
     end
@@ -247,7 +247,7 @@ module Api
     #
     desc 'Sign out'
     delete '/auth/:auth_token' do
-      token = AuthToken.find_by_auth_token(params[:auth_token])
+      token = AuthToken.find_by_auth_token(headers["Auth-Token"])
 
       if token.present?
         logger.info "Sign out #{token.user.username} from #{request.ip}"
