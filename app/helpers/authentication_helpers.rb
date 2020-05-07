@@ -52,6 +52,11 @@ module AuthenticationHelpers
         type:     'String',
         desc:     'Authentication token'
       }
+      options[:params]['username'] = {
+        required: true,
+        type:     'String',
+        desc:     'user username'
+      }
     end
   end
 
