@@ -24,7 +24,10 @@ class User < ActiveRecord::Base
   attr_encrypted :auth_token,
                  key: Doubtfire::Application.secrets.secret_key_attr,
                  encode: true,
-                 attribute: 'authentication_token'
+                 attribute: 'authentication_token',
+                 algorithm: 'aes-256-cbc',
+                 mode: :single_iv_and_salt,
+                 insecure_mode: true
 
   # User authentication config
   if AuthenticationHelpers.aaf_auth?
@@ -62,7 +65,7 @@ class User < ActiveRecord::Base
     devise strategy, *devise_keys
   end
 
-  # 
+  #
   # We incorporate password details for local dev server - needed to keep devise happy
   #
   def password

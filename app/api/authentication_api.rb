@@ -171,12 +171,12 @@ module Api
         requires :auth_token, type: String, desc: 'The user\'s temporary auth token'
       end
       post '/auth' do
-        error!({ error: 'Invalid token.' }, 404) if params[:auth_token].nil?
+        error!({ error: 'Invalid token.' }, 404) if headers["Auth-Token"].nil?
         logger.info "Get user via auth_token from #{request.ip}"
 
         # Authenticate that the token is okay
         if authenticated?
-          user = User.find_by_auth_token(params[:auth_token])
+          user = User.find_by_auth_token(headers["Auth-Token"])
 
           # Invalidate the token and regenrate a new one
           user.reset_authentication_token!
@@ -219,11 +219,11 @@ module Api
       optional :remember, type: Boolean, desc: 'User has requested to remember login', default: false
     end
     put '/auth/:auth_token' do
-      error!({ error: 'Invalid token.' }, 404) if params[:auth_token].nil?
+      error!({ error: 'Invalid token.' }, 404) if headers["Auth-Token"].nil?
       logger.info "Update token #{params[:username]} from #{request.ip}"
 
       # Find user
-      user = User.find_by_auth_token(params[:auth_token])
+      user = User.find_by_auth_token(headers["Auth-Token"])
       remember = params[:remember] || false
 
       # Token does not match user
@@ -244,7 +244,7 @@ module Api
     #
     desc 'Sign out'
     delete '/auth/:auth_token' do
-      user = User.find_by_auth_token(params[:auth_token])
+      user = User.find_by_auth_token(headers["Auth-Token"])
 
       if user
         logger.info "Sign out #{user.username} from #{request.ip}"

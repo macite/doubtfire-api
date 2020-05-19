@@ -16,11 +16,12 @@ module AuthenticationHelpers
   # Reads details from the params fetched from the caller context.
   #
   def authenticated?
-    user_by_token = User.find_by_auth_token(params[:auth_token]) if params && params[:auth_token]
+    logger.info "Authentication token: #{headers["Auth-Token"]}"
+    user_by_token = User.find_by_auth_token(headers["Auth-Token"]) if headers["Auth-Token"]
     # Check warden -- authenticate using DB or LDAP etc.
     return true if warden.authenticated?
     # Check user by token
-    if params[:auth_token] && user_by_token && user_by_token.auth_token_expiry
+    if headers["Auth-Token"] && user_by_token && user_by_token.auth_token_expiry
       # Non-expired token
       return true if user_by_token.auth_token_expiry > Time.zone.now
       # Time out this token
@@ -36,7 +37,7 @@ module AuthenticationHelpers
   # Get the current user either from warden or from the token
   #
   def current_user
-    warden.user || User.find_by_auth_token(params[:auth_token])
+    warden.user || User.find_by_auth_token(headers["Auth-Token"])
   end
 
   #
@@ -47,9 +48,16 @@ module AuthenticationHelpers
     service.routes.each do |route|
       options = route.instance_variable_get('@options')
       next if options[:params]['auth_token']
+      options[:params]['username'] = {
+        required: true,
+        type:     'String',
+        in:       'header',
+        desc:     'Username'
+      }
       options[:params]['auth_token'] = {
         required: true,
         type:     'String',
+        in:       'header',
         desc:     'Authentication token'
       }
     end
