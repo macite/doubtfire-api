@@ -8,6 +8,7 @@ class ProjectSerializer < ActiveModel::Serializer
              :project_id,
              :student_id,
              :campus_id,
+             :tags,
              :started,
              :stats,
              :student_name,

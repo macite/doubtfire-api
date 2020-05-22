@@ -27,7 +27,7 @@ module Api
                  joins(:unit).
                  joins(:user).
                  select( 'projects.*',
-                          'units.name AS unit_name', 'units.id AS unit_id', 'units.code AS unit_code', 'units.start_date AS start_date', 'units.end_date AS end_date', 'units.teaching_period_id AS teaching_period_id', 'units.active AS active',
+                          'units.name AS unit_name', 'units.id AS unit_id', 'units.code AS unit_code', 'units.start_date AS start_date', 'units.end_date AS end_date', 'units.teaching_period_id AS teaching_period_id', 'units.active AS active', 'projects.tags AS tags',
                           "#{student_name} AS student_name"
                         )
 
@@ -44,7 +44,8 @@ module Api
           start_date: row['start_date'],
           end_date: row['end_date'],
           teaching_period_id: row['teaching_period_id'],
-          active: row['active'].is_a?(Numeric) ? row['active'] != 0 : row['active']
+          active: row['active'].is_a?(Numeric) ? row['active'] != 0 : row['active'],
+          tags: row['tags']
         }
       end
     end
@@ -76,6 +77,7 @@ module Api
       optional :grade,              type: Integer, desc: 'New grade'
       optional :old_grade,          type: Integer, desc: 'Old grade to check it has not changed...'
       optional :grade_rationale,    type: String,  desc: 'New grade rationale'
+      optional :tags,               type: String,  desc: 'Indicate the tags associated with the project (space separated)'
     end
     put '/projects/:id' do
       project = Project.find(params[:id])
@@ -103,13 +105,6 @@ module Api
         end
         project.enrolled = params[:enrolled]
         project.save
-      elsif !params[:target_grade].nil?
-        unless authorise? current_user, project, :change
-          error!({ error: "You do not have permissions to change Project with id=#{params[:id]}" }, 403)
-        end
-
-        project.target_grade = params[:target_grade]
-        project.save
       elsif !params[:grade].nil?
         unless authorise? current_user, project, :assess
           error!({ error: "You do not have permissions to assess Project with id=#{params[:id]}" }, 403)
@@ -130,13 +125,18 @@ module Api
         project.grade = params[:grade]
         project.grade_rationale = params[:grade_rationale]
         project.save!
-      elsif !params[:compile_portfolio].nil?
+      else # Just update data changed
         unless authorise? current_user, project, :change
           error!({ error: "You do not have permissions to change Project with id=#{params[:id]}" }, 403)
         end
 
-        project.compile_portfolio = params[:compile_portfolio]
-        project.save
+        project_parameters = ActionController::Parameters.new(params)
+          .permit(
+            :tags,
+            :compile_portfolio,
+            :target_grade
+          )
+        project.update!(project_parameters)
       end
 
       Thread.current[:user] = current_user
