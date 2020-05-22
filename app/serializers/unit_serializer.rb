@@ -8,7 +8,7 @@ class ShallowUnitSerializer < ActiveModel::Serializer
 end
 
 class UnitSerializer < ActiveModel::Serializer
-  attributes :code, :id, :name, :my_role, :main_convenor_id, :description, :teaching_period_id, :start_date, :end_date, :active, :convenors, :ilos, :auto_apply_extension_before_deadline, :send_notifications, :group_memberships
+  attributes :code, :id, :name, :my_role, :main_convenor_id, :description, :teaching_period_id, :start_date, :end_date, :active, :convenors, :ilos, :auto_apply_extension_before_deadline, :send_notifications, :group_memberships, :tags
 
   def start_date
     object.start_date.to_date
