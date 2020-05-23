@@ -3,5 +3,7 @@ FactoryBot.define do
     unit
     campus
     user
+    
+    tags            { nil }
   end
 end

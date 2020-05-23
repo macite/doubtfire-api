@@ -14,6 +14,7 @@ FactoryBot.define do
     target_date               { start_date + rand(1..2).weeks }
     group_set                 { nil }
     tutorial_stream           { unit.tutorial_streams.sample }
+    tags                      { nil }
   end
 
   factory :learning_outcome do
@@ -58,6 +59,7 @@ FactoryBot.define do
     teaching_period { nil }
     code            { "SIT#{Faker::Number.unique.number(3)}" }
     active          { true }
+    tags            { nil }
     auto_apply_extension_before_deadline { true }
     send_notifications { true }
 
