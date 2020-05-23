@@ -2655,13 +2655,14 @@ class Unit < ActiveRecord::Base
   end
 
   def has_tag? tag
-     /(^| )#{tag}($| )/ =~ tags
+    match = /(^| )#{tag}($| )/ =~ tags
+    match.present?
   end
 
   def add_tag tag
-    return if has_tag? tag
+    return nil if has_tag? tag
 
-    tags = "#{tags}#{' ' if tags.present? && tags.length > 0}#{tag}"
+    self.tags = "#{self.tags}#{' ' if tags.present? && tags.length > 0}#{tag}"
     update(tags: tags)
   end
 
