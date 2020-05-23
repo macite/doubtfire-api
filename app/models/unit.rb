@@ -2654,6 +2654,31 @@ class Unit < ActiveRecord::Base
     summary_stats[:staff] = {}
   end
 
+  def has_tag? tag
+     /(^| )#{tag}($| )/ =~ tags
+  end
+
+  def add_tag tag
+    return if has_tag? tag
+
+    tags = "#{tags}#{' ' if tags.present? && tags.length > 0}#{tag}"
+    update(tags: tags)
+  end
+
+  def remove_tag tag
+    return unless has_tag? tag
+
+    if /( )#{tag}($| )/ =~ tags
+      tags.slice! " #{tag}"
+    elsif /^#{tag}( )/ =~ tags
+      tags.slice! "#{tag} "
+    else
+      tags.slice! tag
+    end
+
+    update(tags: tags)
+  end
+
 private
   def delete_associated_files
     FileUtils.rm_rf FileHelper.unit_dir(self)
