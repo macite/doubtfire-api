@@ -574,4 +574,20 @@ class UnitModelTest < ActiveSupport::TestCase
     unit.send_weekly_status_emails(summary_stats)
   end
 
+  def test_add_tag
+    unit = FactoryBot.create(:unit, code: 'SIT101', stream_count: 0, with_students: false)
+
+    unit.add_tag 'SIT101'
+    assert unit.has_tag? 'SIT101'
+
+    unit.add_tag 'SIT102'
+    assert unit.has_tag? 'SIT102'
+
+    unit.remove_tag 'SIT101'
+    refute unit.has_tag? 'SIT101'
+    assert unit.has_tag? 'SIT102'
+
+    unit.destroy!
+  end
+
 end
