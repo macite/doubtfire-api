@@ -4,7 +4,7 @@
 require 'unit_role_serializer'
 
 class ShallowUnitSerializer < ActiveModel::Serializer
-  attributes :code, :id, :name, :teaching_period_id, :start_date, :end_date, :active
+  attributes :code, :id, :name, :teaching_period_id, :start_date, :end_date, :active, :tags
 end
 
 class UnitSerializer < ActiveModel::Serializer
