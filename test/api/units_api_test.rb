@@ -24,7 +24,8 @@ class UnitsApiTest < ActiveSupport::TestCase
                                     name: 'Intro to Social Skills',
                                     code: 'JRRW40003',
                                     start_date: '2016-05-14T00:00:00.000Z',
-                                    end_date: '2017-05-14T00:00:00.000Z'
+                                    end_date: '2017-05-14T00:00:00.000Z',
+                                    tags: 'SIT102'
                                   })
     expected_unit = data_to_post[:unit]
     unit_count = Unit.all.length
@@ -39,9 +40,11 @@ class UnitsApiTest < ActiveSupport::TestCase
     assert_equal expected_unit[:code], actual_unit['code']
     assert_equal expected_unit[:start_date], actual_unit['start_date']
     assert_equal expected_unit[:end_date], actual_unit['end_date']
+    assert_equal expected_unit[:tags], actual_unit['tags']
 
     assert_equal unit_count + 1, Unit.all.count
     assert_equal expected_unit[:name], Unit.last.name
+    assert_equal expected_unit[:tags], Unit.last.tags
   end
 
   def create_unit
