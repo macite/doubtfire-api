@@ -2654,12 +2654,20 @@ class Unit < ActiveRecord::Base
     summary_stats[:staff] = {}
   end
 
+  def tag_valid? tag
+    match = /^\w+$/ =~ tag
+    match.present?
+  end
+
   def has_tag? tag
+    return false unless tag_valid? tag
+
     match = /(^| )#{tag}($| )/ =~ tags
     match.present?
   end
 
   def add_tag tag
+    return nil unless tag_valid? tag
     return nil if has_tag? tag
 
     self.tags = "#{self.tags}#{' ' if tags.present? && tags.length > 0}#{tag}"

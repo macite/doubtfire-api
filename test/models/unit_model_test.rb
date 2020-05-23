@@ -594,6 +594,14 @@ class UnitModelTest < ActiveSupport::TestCase
   def test_partial_tags_work
     unit = FactoryBot.create(:unit, code: 'SIT101', stream_count: 0, with_students: false)
 
+    assert unit.tag_valid? 'SIT101'
+    assert unit.tag_valid? '101'
+    assert unit.tag_valid? '_Test_'
+    assert unit.tag_valid? '_'
+    refute unit.tag_valid? 'SIT 101'
+    refute unit.tag_valid? 'SIT%101'
+    refute unit.tag_valid? 'SIT)101'
+
     unit.add_tag 'SIT101'
     assert unit.has_tag? 'SIT101'
 
@@ -604,8 +612,6 @@ class UnitModelTest < ActiveSupport::TestCase
     refute unit.has_tag? 'SIT'
     refute unit.has_tag? '102'
     refute unit.has_tag? 'SIT101 SIT102'
-
-    puts unit.tags
 
     unit.remove_tag 'SIT'
     assert unit.has_tag? 'SIT101'
