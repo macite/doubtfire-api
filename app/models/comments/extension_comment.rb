@@ -1,8 +1,8 @@
 class ExtensionComment < TaskComment
   belongs_to :assessor, class_name: 'User', optional: true
 
-  def serialize(user)
-    json = super(user)
+  def serialize(user, last_id = id)
+    json = super(user, last_id)
     json[:granted] = extension_granted
     json[:assessed] = date_extension_assessed.present?
     json[:date_assessed] = date_extension_assessed
@@ -23,7 +23,7 @@ class ExtensionComment < TaskComment
   # the main tutor reading without assessing. As only the main tutor
   # propagates reads, this will work as required - other staff cant
   # make it read for the main tutor.
-  def mark_as_read(user, unit = self.unit)
+  def mark_as_read(user)
     super if assessed? || user == project.student || user != recipient
   end
 

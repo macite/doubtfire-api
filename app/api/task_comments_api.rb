@@ -135,9 +135,8 @@ class TaskCommentsApi < Grape::API
       task = project.task_for_task_definition(task_definition)
 
       comments = task.all_comments.order('created_at ASC')
-      result = comments.map { |c| c.serialize(current_user) }
-      # result = task.comments_for_user(current_user)
-      # result.each do |d| end # cache results...
+      last_id = task.last_comment_read_by(current_user)
+      result = comments.map { |c| c.serialize(current_user, last_id) }
 
       # mark every comment type except for DiscussionComments so we don't mark it as read.
       comments_to_mark_as_read = comments.where("TYPE is null OR TYPE != 'DiscussionComment'")

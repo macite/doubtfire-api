@@ -1692,24 +1692,23 @@ class Unit < ApplicationRecord
   # Return all tasks from the database for this unit and given user
   #
   def get_all_tasks_for(user)
-    student_tasks.
-      joins(:task_status).
-      joins("LEFT OUTER JOIN (#{tutorial_enrolment_subquery}) as sq ON sq.project_id = projects.id AND (sq.tutorial_stream_id = task_definitions.tutorial_stream_id OR sq.tutorial_stream_id IS NULL)").
-      joins("LEFT JOIN task_comments ON task_comments.task_id = tasks.id AND (task_comments.type IS NULL OR task_comments.type <> 'TaskStatusComment')").
-      joins("LEFT JOIN comments_read_receipts crr ON crr.task_comment_id = task_comments.id AND crr.user_id = #{user.id}").
-      joins("LEFT JOIN task_pins ON task_pins.task_id = tasks.id AND task_pins.user_id = #{user.id}").
-      joins('LEFT OUTER JOIN task_similarities ON tasks.id = task_similarities.task_id').
-      select(
+    student_tasks
+      .joins(:task_status)
+      .joins("LEFT OUTER JOIN (#{TaskComment.num_comments_unread_by_user_subquery(user, true)}) num_comments_unread ON num_comments_unread.task_id = tasks.id")
+      .joins("LEFT OUTER JOIN (#{TaskComment.task_has_extension_requests_subquery}) extn_comments ON extn_comments.task_id = tasks.id")
+      .joins("LEFT OUTER JOIN (#{tutorial_enrolment_subquery}) as sq ON sq.project_id = projects.id AND (sq.tutorial_stream_id = task_definitions_tasks.tutorial_stream_id OR sq.tutorial_stream_id IS NULL)")
+      .joins("LEFT JOIN task_pins ON task_pins.task_id = tasks.id AND task_pins.user_id = #{user.id}")
+      .joins('LEFT OUTER JOIN task_similarities ON tasks.id = task_similarities.task_id')
+      .select(
         'sq.tutorial_id AS tutorial_id',
         'sq.tutorial_stream_id AS tutorial_stream_id',
-        'tasks.id',
-        "SUM(case when crr.user_id is null AND NOT task_comments.id is null then 1 else 0 end) as number_unread",
-        'COUNT(distinct task_pins.task_id) != 0 as pinned',
-        "SUM(case when task_comments.date_extension_assessed IS NULL AND task_comments.type = 'ExtensionComment' AND NOT task_comments.id IS NULL THEN 1 ELSE 0 END) > 0 as has_extensions",
+        'num_comments_unread.number_unread as number_unread',
+        'COUNT(distinct task_pins.task_id) != 0 AS pinned',
+        "extn_comments.num_extensions AS has_extensions",
         'project_id',
         'tasks.id as task_id',
         'task_definition_id',
-        'task_definitions.start_date as start_date',
+        'task_definitions_tasks.start_date as start_date',
         'task_statuses.id as status_id',
         'completion_date',
         'times_assessed',
@@ -1725,7 +1724,7 @@ class Unit < ApplicationRecord
         'project_id',
         'tasks.id',
         'task_definition_id',
-        'task_definitions.start_date',
+        'task_definitions_tasks.start_date',
         'status_id',
         'completion_date',
         'times_assessed',
@@ -1757,8 +1756,8 @@ class Unit < ApplicationRecord
   #
   def tasks_for_task_inbox(user)
     get_all_tasks_for(user)
-      .having('task_statuses.id IN (:ids) OR COUNT(task_pins.task_id) > 0 OR SUM(case when crr.user_id is null AND NOT task_comments.id is null then 1 else 0 end) > 0', ids: [TaskStatus.ready_for_feedback, TaskStatus.need_help])
-      .order('pinned DESC, submission_date ASC, MAX(task_comments.created_at) ASC, task_definition_id ASC')
+      .having('task_statuses.id IN (:ids) OR COUNT(task_pins.task_id) > 0 OR number_unread > 0', ids: [TaskStatus.ready_for_feedback, TaskStatus.need_help])
+      .order('pinned DESC, submission_date ASC, task_definition_id ASC')
   end
 
   #

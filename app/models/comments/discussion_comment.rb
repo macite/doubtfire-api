@@ -20,8 +20,8 @@ class DiscussionComment < TaskComment
     FileHelper.comment_reply_prompt_path(self, ".wav")
   end
 
-  def serialize(user)
-    json = super(user)
+  def serialize(user, last_id = id)
+    json = super(user, last_id)
     json[:status] = status
     json[:time_discussion_completed] = time_discussion_completed
     json[:time_discussion_started] = time_discussion_started

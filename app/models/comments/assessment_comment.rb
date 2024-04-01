@@ -5,8 +5,8 @@ class AssessmentComment < TaskComment
     self.content_type = :assessment
   end
 
-  def serialize(user)
-    json = super(user)
+  def serialize(user, last_id = id)
+    json = super(user, last_id)
     json[:overseer_assessment_id] = self.overseer_assessment_id
     json
   end

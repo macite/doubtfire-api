@@ -7,3 +7,7 @@ register_webhooks:
 progress_turn_it_in_jobs:
   cron: "every 30 minutes"
   class: "TiiCheckProgressJob"
+
+clean_read_receipts_job:
+  cron: "every day at 4"
+  class: "CleanReadReceiptsJob"

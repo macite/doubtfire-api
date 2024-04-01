@@ -13,31 +13,6 @@ class TaskDefinitionTest < ActiveSupport::TestCase
     Rails.application
   end
 
-  def test_comments_for_user
-    project = FactoryBot.create(:project)
-    unit = project.unit
-    user = project.student
-    convenor = unit.main_convenor_user
-    task_definition = unit.task_definitions.first
-    task = project.task_for_task_definition(task_definition)
-
-    task.add_text_comment(convenor, 'Hello World')
-    task.add_text_comment(convenor, 'Message 2')
-    task.add_text_comment(convenor, 'Last message')
-
-    comments = task.comments_for_user(user)
-    comments.each do |data|
-      assert_equal 1, data.is_new
-    end
-
-    task.mark_comments_as_read user, task.comments
-
-    comments = task.comments_for_user(user)
-    comments.each do |data|
-      assert_equal 0, data.is_new
-    end
-  end
-
   def test_pdf_creation_with_gif
     unit = Unit.first
     td = TaskDefinition.new({

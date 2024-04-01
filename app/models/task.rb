@@ -152,51 +152,56 @@ class Task < ApplicationRecord
     "#{task_definition.abbreviation} for #{project.student.username}"
   end
 
+  def last_comment_read_by(user)
+    # Get id for the user if it exists
+    result = all_comments
+             .joins(:comments_read_receipts)
+             .select("MAX(task_comments.id) as task_comment_id, comments_read_receipts.user_id as user_id")
+             .group("comments_read_receipts.user_id")
+             .where("comments_read_receipts.user_id = :uid", uid: user.id)
+             .where("tasks.id = :tid", tid: id)
+             .last&.task_comment_id
+
+    if user != student
+      # check message of recipient tutor
+      tutor_read = CommentsReadReceipts
+                   .joins(task_comment: { task: { task_definition: :tutorial_stream } })
+                   .joins("left OUTER join projects ON projects.id = tasks.project_id")
+                   .joins("left OUTER join tutorial_enrolments ON tutorial_enrolments.project_id = projects.id")
+                   .joins("left OUTER join tutorials ON tutorials.id = tutorial_enrolments.tutorial_id AND (tutorials.tutorial_stream_id = tutorial_streams.id OR tutorial_streams.id IS NULL)")
+                   .joins("left OUTER join unit_roles ON tutorials.unit_role_id = unit_roles.id")
+                   .joins("left OUTER join users ON users.id = unit_roles.user_id")
+                   .select("MAX(task_comments.id) as task_comment_id, tasks.id as task_id, users.id as user_id")
+                   .group("comments_read_receipts.user_id")
+                   .where('comments_read_receipts.user_id = users.id')
+                   .where("tasks.id = :tid OR tasks.group_submission_id = :gsid", tid: id, gsid: group_submission&.id)
+                   .last&.task_comment_id
+
+      result = tutor_read if tutor_read && (result.nil? || tutor_read > result)
+    end
+
+    result
+  end
+
   def all_comments
-    if group_submission.nil?
-      comments
+    if group_submission_id.nil?
+      comments.joins(:task)
     else
-      TaskComment.joins(:task).where('tasks.group_submission_id = :id', id: group_submission.id)
+      TaskComment.joins(:task).where('tasks.group_submission_id = :id', id: group_submission_id)
     end
   end
 
   def mark_comments_as_read(user, comments)
+    task_map = {}
     comments.each do |comment|
-      comment.mark_as_read(user, unit)
+      puts comment.task_id
+      task_map[comment.task_id] = task_map.key?(comment.task_id) && task_map[comment.task_id].id > comment.id ? task_map[comment.task_id] : comment
     end
-  end
 
-  def mark_comments_as_unread(user, comments)
-    comments.each do |comment|
-      comment.mark_as_unread(user)
+    task_map.each_value do |last_comment|
+      # Mark the last for each task as read! (separate tasks in group submissions)
+      last_comment.mark_as_read(user)
     end
-  end
-
-  def comments_for_user(user)
-    TaskComment
-      .joins('JOIN users AS authors ON authors.id = task_comments.user_id')
-      .joins('JOIN users AS recipients ON recipients.id = task_comments.recipient_id')
-      .joins("LEFT JOIN comments_read_receipts u_crr ON u_crr.task_comment_id = task_comments.id AND u_crr.user_id = #{user.id}")
-      .joins("LEFT JOIN comments_read_receipts r_crr ON r_crr.task_comment_id = task_comments.id AND r_crr.user_id = recipients.id")
-      .where('task_comments.task_id = :task_id', task_id: self.id)
-      .order('created_at ASC')
-      .select(
-        'task_comments.id AS id',
-        'task_comments.comment AS comment',
-        'task_comments.content_type AS content_type',
-        "case when u_crr.created_at IS NULL then 1 else 0 end AS is_new",
-        'r_crr.created_at AS recipient_read_time',
-        'task_comments.created_at AS created_at',
-        'authors.id AS author_id',
-        'authors.first_name AS author_first_name',
-        'authors.last_name AS author_last_name',
-        'authors.email AS author_email',
-        'recipients.id AS recipient_id',
-        'recipients.first_name AS recipient_first_name',
-        'recipients.last_name AS recipient_last_name',
-        'recipients.email AS recipient_email',
-        'task_comments.reply_to_id AS reply_to_id'
-      )
   end
 
   def current_task_similarities
@@ -688,7 +693,7 @@ class Task < ApplicationRecord
       raise "Error attaching uploaded file." unless discussion.add_prompt(prompt, index)
     end
 
-    discussion.mark_as_read(user, unit)
+    discussion.mark_as_read(user)
 
     logger.info(discussion)
     return discussion

@@ -253,13 +253,14 @@ class Project < ApplicationRecord
   def task_details_for_shallow_serializer(user)
     tasks
       .joins(:task_status)
-      .joins("LEFT JOIN task_comments ON task_comments.task_id = tasks.id AND (task_comments.type IS NULL OR task_comments.type <> 'TaskStatusComment')")
-      .joins("LEFT JOIN comments_read_receipts crr ON crr.task_comment_id = task_comments.id AND crr.user_id = #{user.id}")
+      .joins("LEFT OUTER JOIN (#{TaskComment.num_comments_unread_by_user_subquery(user, user.id != user_id, false)}) num_comments_unread ON num_comments_unread.task_id = tasks.id")
+      .joins("LEFT OUTER JOIN (#{TaskComment.num_comments_unread_by_user_subquery(user, user.id != user_id, true)}) num_grp_comments_unread ON num_comments_unread.task_id = tasks.id")
       .joins('LEFT OUTER JOIN task_similarities ON tasks.id = task_similarities.task_id')
       .select(
-        'SUM(case when crr.user_id is null AND NOT task_comments.id is null then 1 else 0 end) as number_unread', 'project_id', 'tasks.id as id',
+        'CASE WHEN tasks.group_submission_id IS NULL THEN num_comments_unread.number_unread ELSE num_grp_comments_unread.number_unread END as number_unread',
+        'project_id', 'tasks.id as id',
         'task_definition_id', 'task_statuses.id as status_id',
-        'completion_date', 'times_assessed', 'submission_date', 'tasks.grade as grade', 'quality_pts', 'include_in_portfolio', 'grade',
+        'completion_date', 'times_assessed', 'submission_date', 'tasks.grade as grade', 'quality_pts', 'include_in_portfolio', 'grade', 'extensions',
         'SUM(case when task_similarities.flagged then 1 else 0 end) as similar_to_count'
       )
       .group(
@@ -279,7 +280,7 @@ class Project < ApplicationRecord
           quality_pts: r.quality_pts,
           num_new_comments: r.number_unread,
           similarity_flag: AuthorisationHelpers.authorise?(user, t, :view_plagiarism) ? r.similar_to_count > 0 : false,
-          extensions: t.extensions,
+          extensions: r.extensions,
           due_date: t.due_date,
           submission_date: t.submission_date,
           completion_date: t.completion_date

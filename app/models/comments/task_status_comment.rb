@@ -9,8 +9,8 @@ class TaskStatusComment < TaskComment
     mark_as_read(self.recipient)
   end
 
-  def serialize(user)
-    json = super(user)
+  def serialize(user, last_id = id)
+    json = super(user, last_id)
     json[:recipient_read_time] = nil
     json[:date] = self.created_at
     json[:status] = task_status.status_key
