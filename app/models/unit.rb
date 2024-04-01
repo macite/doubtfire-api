@@ -1657,9 +1657,6 @@ class Unit < ApplicationRecord
     result
   end
 
-
-
-
   def tasks_as_hash(data)
     task_ids = data.map(&:task_id).uniq
     data.map do |t|
@@ -1700,13 +1697,13 @@ class Unit < ApplicationRecord
       .joins("LEFT JOIN task_pins ON task_pins.task_id = tasks.id AND task_pins.user_id = #{user.id}")
       .joins('LEFT OUTER JOIN task_similarities ON tasks.id = task_similarities.task_id')
       .select(
+        'tasks.id AS task_id',
         'sq.tutorial_id AS tutorial_id',
         'sq.tutorial_stream_id AS tutorial_stream_id',
         'num_comments_unread.number_unread as number_unread',
         'COUNT(distinct task_pins.task_id) != 0 AS pinned',
         "extn_comments.num_extensions AS has_extensions",
         'project_id',
-        'tasks.id as task_id',
         'task_definition_id',
         'task_definitions_tasks.start_date as start_date',
         'task_statuses.id as status_id',

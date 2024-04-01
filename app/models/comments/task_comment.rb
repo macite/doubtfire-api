@@ -54,17 +54,19 @@ class TaskComment < ApplicationRecord
 
   def self.num_comments_unread_by_user_subquery(user, exclude_tutor_read_comments, groups = false)
     last_read_by_user_subquery = CommentsReadReceipts # All read receipts
-                                 .select('MAX(task_comment_id) as task_comment_id', 'task_id as task_id', 'user_id as user_id') # Get last comment and task
-                                 .group('task_id', 'user_id') # By task
+                                 .joins(:task_comment)
+                                 .select('MAX(task_comment_id) as task_comment_id', 'task_id as task_id', 'comments_read_receipts.user_id as user_id') # Get last comment and task
+                                 .group('task_id', 'comments_read_receipts.user_id') # By task
                                  .to_sql
 
     last_read_by_tutor_subquery = if exclude_tutor_read_comments
                                     TaskComment.exclude_tutor_read_comments_subquery
                                   else
                                     CommentsReadReceipts # All read receipts
-                                      .select('MAX(task_comment_id) as task_comment_id', 'task_id as task_id', 'user_id as user_id') # Get last comment and task
+                                      .joins(:task_comment)
+                                      .select('MAX(task_comment_id) as task_comment_id', 'task_id as task_id', 'comments_read_receipts.user_id as user_id') # Get last comment and task
                                       .where("comments_read_receipts.user_id = :uid", uid: user.id)
-                                      .group('task_id', 'user_id') # By task
+                                      .group('task_id', 'comments_read_receipts.user_id') # By task
                                       .to_sql
                                   end
 
@@ -79,8 +81,8 @@ class TaskComment < ApplicationRecord
         # 'crr.user_id as crr_uid',
         # 'crr.task_comment_id as last_read_by_user',
         # 'crr2.task_comment_id as last_read_by_tutor',
-        (groups ? 'my_tasks.group_submission_id as group_submission_id' : 'task_comments.task_id as task_id'),
-        'SUM(CASE WHEN (crr.task_comment_id IS NULL OR crr.task_comment_id < task_comments.id) AND (crr2.task_comment_id IS NULL OR crr2.task_comment_id < task_comments.id) THEN 1 ELSE 0 END) as number_unread'
+        (groups ? 'my_tasks.group_submission_id AS group_submission_id' : 'task_comments.task_id AS task_id'),
+        'SUM(CASE WHEN (crr.task_comment_id IS NULL OR crr.task_comment_id < task_comments.id) AND (crr2.task_comment_id IS NULL OR crr2.task_comment_id < task_comments.id) THEN 1 ELSE 0 END) AS number_unread'
       )
       .group((groups ? 'my_tasks.group_submission_id' : 'task_comments.task_id'))
       .having("NOT #{groups ? 'my_tasks.group_submission_id' : 'task_comments.task_id'} IS NULL")
@@ -165,7 +167,7 @@ class TaskComment < ApplicationRecord
     crr = read_receipt_for(user)
 
     if crr.nil?
-      crr = CommentsReadReceipts.find_or_create_by(user: user, task_comment: self, task: task)
+      crr = CommentsReadReceipts.find_or_create_by(user: user, task_comment: self)
     else
       crr.update(created_at: Time.now, task_comment: self)
     end
