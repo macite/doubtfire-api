@@ -262,8 +262,8 @@ class Project < ApplicationRecord
   def task_details_for_shallow_serializer(user)
     tasks
       .joins(:task_status)
-      .joins("LEFT OUTER JOIN (#{TaskComment.num_comments_unread_by_user_subquery(user, user.id != user_id, false)}) num_comments_unread ON num_comments_unread.task_id = tasks.id")
-      .joins("LEFT OUTER JOIN (#{TaskComment.num_comments_unread_by_user_subquery(user, user.id != user_id, true)}) num_grp_comments_unread ON num_comments_unread.task_id = tasks.id")
+      .joins("LEFT OUTER JOIN (#{TaskComment.num_comments_unread_by_user_subquery(user, user.id != user_id, groups: false)}) num_comments_unread ON num_comments_unread.task_id = tasks.id")
+      .joins("LEFT OUTER JOIN (#{TaskComment.num_comments_unread_by_user_subquery(user, user.id != user_id, groups: true)}) num_grp_comments_unread ON num_comments_unread.task_id = tasks.id")
       .joins('LEFT OUTER JOIN task_similarities ON tasks.id = task_similarities.task_id')
       .select(
         'CASE WHEN tasks.group_submission_id IS NULL THEN num_comments_unread.number_unread ELSE num_grp_comments_unread.number_unread END as number_unread',

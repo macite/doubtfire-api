@@ -210,7 +210,6 @@ class Task < ApplicationRecord
   def mark_comments_as_read(user, comments)
     task_map = {}
     comments.each do |comment|
-      puts comment.task_id
       task_map[comment.task_id] = task_map.key?(comment.task_id) && task_map[comment.task_id].id > comment.id ? task_map[comment.task_id] : comment
     end
 

@@ -52,7 +52,7 @@ class TaskComment < ApplicationRecord
       .to_sql
   end
 
-  def self.num_comments_unread_by_user_subquery(user, exclude_tutor_read_comments, groups = false)
+  def self.num_comments_unread_by_user_subquery(user, exclude_tutor_read_comments, groups: false)
     last_read_by_user_subquery = CommentsReadReceipts # All read receipts
                                  .joins(:task_comment)
                                  .select('MAX(task_comment_id) as task_comment_id', 'task_id as task_id', 'comments_read_receipts.user_id as user_id') # Get last comment and task
@@ -94,14 +94,14 @@ class TaskComment < ApplicationRecord
 
     # Subquery lists the task id and user id for each task that has a teaching staff member
     task_teaching_staff_subquery = Task
-                                   .joins(project: {unit: { unit_roles: :user}})
+                                   .joins(project: { unit: { unit_roles: :user } })
                                    .select("tasks.id as task_id", "users.id as user_id").to_sql
 
     CommentsReadReceipts
       .joins('JOIN task_comments my_task_comments ON my_task_comments.id = comments_read_receipts.task_comment_id')
       .joins("JOIN (#{TaskComment.exclude_tutor_read_comments_subquery}) crr2 ON my_task_comments.task_id = crr2.task_id")
       .joins("JOIN (#{task_teaching_staff_subquery}) ttss ON ttss.task_id = my_task_comments.task_id AND ttss.user_id = comments_read_receipts.user_id")
-      .select('my_task_comments.task_id as tid', 'crr2.user_id as user_id', 'my_task_comments.id as tcid','comments_read_receipts.user_id as uid, ttss.user_id as ttss_user_id')
+      .select('my_task_comments.task_id as tid', 'crr2.user_id as user_id', 'my_task_comments.id as tcid', 'comments_read_receipts.user_id as uid, ttss.user_id as ttss_user_id')
       .where('crr2.user_id <> comments_read_receipts.user_id')
       .where('crr2.task_comment_id >= comments_read_receipts.task_comment_id')
       .delete_all
@@ -169,7 +169,7 @@ class TaskComment < ApplicationRecord
     if crr.nil?
       crr = CommentsReadReceipts.find_or_create_by(user: user, task_comment: self)
     else
-      crr.update(created_at: Time.now, task_comment: self)
+      crr.update(created_at: Time.zone.now, task_comment: self)
     end
   end
 

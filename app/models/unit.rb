@@ -1721,7 +1721,7 @@ class Unit < ApplicationRecord
   def get_all_tasks_for(user)
     student_tasks
       .joins(:task_status)
-      .joins("LEFT OUTER JOIN (#{TaskComment.num_comments_unread_by_user_subquery(user, true)}) num_comments_unread ON num_comments_unread.task_id = tasks.id")
+      .joins("LEFT OUTER JOIN (#{TaskComment.num_comments_unread_by_user_subquery(user, groups: true)}) num_comments_unread ON num_comments_unread.task_id = tasks.id")
       .joins("LEFT OUTER JOIN (#{TaskComment.task_has_extension_requests_subquery}) extn_comments ON extn_comments.task_id = tasks.id")
       .joins("LEFT OUTER JOIN (#{tutorial_enrolment_subquery}) as sq ON sq.project_id = projects.id AND (sq.tutorial_stream_id = task_definitions_tasks.tutorial_stream_id OR sq.tutorial_stream_id IS NULL)")
       .joins("LEFT JOIN task_pins ON task_pins.task_id = tasks.id AND task_pins.user_id = #{user.id}")
