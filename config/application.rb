@@ -17,7 +17,7 @@ module Doubtfire
     config.load_defaults 7.0
 
     # Load .env variables
-    Dotenv::Railtie.load
+    Dotenv::Rails.load
 
     # ==> Authentication Method
     # Authentication method default is database, but possible settings
@@ -29,7 +29,20 @@ module Doubtfire
     # File server location for storing student's work. Defaults to `student_work`
     # directory under root but is overridden using DF_STUDENT_WORK_DIR environment
     # variable.
-    config.student_work_dir = ENV['DF_STUDENT_WORK_DIR'] || "#{Rails.root}/student_work"
+    config.student_work_dir = ENV['DF_STUDENT_WORK_DIR'] || Rails.root.join('student_work').to_s
+
+    # Limit number of pdf generators to run at once
+    config.pdfgen_max_processes = ENV['DF_MAX_PDF_GEN_PROCESSES'] || 2
+
+    # Date range for auditors to view
+    config.auditor_unit_access_years = ENV.fetch('DF_AUDITOR_UNIT_ACCESS_YEARS', 2).to_f * 1.year
+
+    # Period for which to keep units
+    config.unit_archive_after_period = ENV.fetch('DF_UNIT_ARCHIVE_PERIOD', 2).to_f * 1.year
+
+    config.student_import_weeks_before = ENV.fetch('DF_IMPORT_STUDENTS_WEEKS_BEFPRE', 1).to_f * 1.week
+
+    config.log_to_stdout = ENV['DF_LOG_TO_STDOUT'].present? && (ENV['DF_LOG_TO_STDOUT'].to_s.downcase == "true" || ENV['DF_LOG_TO_STDOUT'].to_i == 1)
 
     # ==> Load credentials from env
     credentials.secret_key_base = ENV.fetch('DF_SECRET_KEY_BASE', Rails.env.production? ? nil : '9e010ee2f52af762916406fd2ac488c5694a6cc784777136e657511f8bbc7a73f96d59c0a9a778a0d7cf6406f8ecbf77efe4701dfbd63d8248fc7cc7f32dea97')
@@ -40,20 +53,19 @@ module Doubtfire
 
     # ==> Institution settings
     # Institution YAML and ENV (override) config load
-    config.institution = YAML.load_file("#{Rails.root}/config/institution.yml").with_indifferent_access
+    config.institution = YAML.load_file(Rails.root.join('config/institution.yml').to_s).with_indifferent_access
     config.institution[:name] = ENV['DF_INSTITUTION_NAME'] if ENV['DF_INSTITUTION_NAME']
     config.institution[:email_domain] = ENV['DF_INSTITUTION_EMAIL_DOMAIN'] if ENV['DF_INSTITUTION_EMAIL_DOMAIN']
     config.institution[:host] = ENV['DF_INSTITUTION_HOST'] if ENV['DF_INSTITUTION_HOST']
     config.institution[:product_name] = ENV['DF_INSTITUTION_PRODUCT_NAME'] if ENV['DF_INSTITUTION_PRODUCT_NAME']
     config.institution[:privacy] = ENV['DF_INSTITUTION_PRIVACY'] if ENV['DF_INSTITUTION_PRIVACY']
     config.institution[:plagiarism] = ENV['DF_INSTITUTION_PLAGIARISM'] if ENV['DF_INSTITUTION_PLAGIARISM']
-    # Institution host becomes localhost in all but prod
-    config.institution[:host] = 'localhost:3000' if Rails.env.development?
-    config.institution[:host_url] = Rails.env.development? ? "http://#{config.institution[:host]}/" : "https://#{config.institution[:host]}/"
+    # Institution host becomes localhost in development
+    config.institution[:host] ||= 'http://localhost:3000' if Rails.env.development?
     config.institution[:settings] = ENV['DF_INSTITUTION_SETTINGS_RB'] if ENV['DF_INSTITUTION_SETTINGS_RB']
     config.institution[:ffmpeg] = ENV['DF_FFMPEG_PATH'] || 'ffmpeg'
 
-    require "#{Rails.root}/config/#{config.institution[:settings]}" unless config.institution[:settings].nil?
+    require Rails.root.join("config/#{config.institution[:settings]}").to_s unless config.institution[:settings].nil?
 
     # ==> SAML2.0 authentication
     if config.auth_method == :saml
@@ -161,15 +173,15 @@ module Doubtfire
 
     config.autoload_paths <<
       Rails.root.join('app') <<
-      Rails.root.join('app', 'models', 'comments') <<
-      Rails.root.join('app', 'models', 'turn_it_in') <<
-      Rails.root.join('app', 'models', 'similarity')
+      Rails.root.join('app/models/comments') <<
+      Rails.root.join('app/models/turn_it_in') <<
+      Rails.root.join('app/models/similarity')
 
     config.eager_load_paths <<
       Rails.root.join('app') <<
-      Rails.root.join('app', 'models', 'comments') <<
-      Rails.root.join('app', 'models', 'turn_it_in') <<
-      Rails.root.join('app', 'models', 'similarity')
+      Rails.root.join('app/models/comments') <<
+      Rails.root.join('app/models/turn_it_in') <<
+      Rails.root.join('app/models/similarity')
 
     # CORS config
     config.middleware.insert_before Warden::Manager, Rack::Cors do

@@ -6,6 +6,7 @@ class TaskDefinitionsApi < Grape::API
   helpers FileHelper
   helpers MimeCheckHelpers
   helpers Submission::GenerateHelpers
+  helpers FileStreamHelper
 
   before do
     authenticated?
@@ -26,12 +27,12 @@ class TaskDefinitionsApi < Grape::API
       requires :abbreviation,             type: String,   desc: 'The abbreviation of the task'
       requires :restrict_status_updates,  type: Boolean,  desc: 'Restrict updating of the status to staff'
       optional :upload_requirements,      type: String,   desc: 'Task file upload requirements'
-      optional :plagiarism_checks,        type: String,   desc: 'The list of checks to perform'
       requires :plagiarism_warn_pct,      type: Integer,  desc: 'The percent at which to record and warn about plagiarism'
       requires :is_graded,                type: Boolean,  desc: 'Whether or not this task definition is a graded task'
       requires :max_quality_pts,          type: Integer,  desc: 'A range for quality points when quality is assessed'
       optional :assessment_enabled,       type: Boolean,  desc: 'Enable or disable assessment'
       optional :overseer_image_id,        type: Integer,  desc: 'The id of the Docker image for overseer'
+      optional :moss_language,            type: String,   desc: 'The language to use for code similarity checks'
     end
   end
   post '/units/:unit_id/task_definitions/' do
@@ -40,8 +41,6 @@ class TaskDefinitionsApi < Grape::API
     unless authorise? current_user, unit, :add_task_def
       error!({ error: 'Not authorised to create a task definition of this unit' }, 403)
     end
-
-    params[:task_def][:upload_requirements] = [] if params[:task_def][:upload_requirements].nil?
 
     task_params = ActionController::Parameters.new(params)
                                               .require(:task_def)
@@ -59,12 +58,14 @@ class TaskDefinitionsApi < Grape::API
                                                 :is_graded,
                                                 :max_quality_pts,
                                                 :assessment_enabled,
-                                                :overseer_image_id
+                                                :overseer_image_id,
+                                                :moss_language,
+                                                :upload_requirements,
+                                                :unit_id
                                               )
 
     task_params[:unit_id] = unit.id
-    task_params[:upload_requirements] = JSON.parse(params[:task_def][:upload_requirements]) unless params[:task_def][:plagiarism_checks].nil?
-    task_params[:plagiarism_checks] = JSON.parse(params[:task_def][:plagiarism_checks]) unless params[:task_def][:plagiarism_checks].nil?
+    task_params[:upload_requirements] = params[:task_def][:upload_requirements].present? ? JSON.parse(params[:task_def][:upload_requirements]) : []
 
     task_def = TaskDefinition.new(task_params)
 
@@ -104,12 +105,12 @@ class TaskDefinitionsApi < Grape::API
       optional :abbreviation,             type: String,   desc: 'The abbreviation of the task'
       optional :restrict_status_updates,  type: Boolean,  desc: 'Restrict updating of the status to staff'
       optional :upload_requirements,      type: String,   desc: 'Task file upload requirements'
-      optional :plagiarism_checks,        type: String,   desc: 'The list of checks to perform'
       optional :plagiarism_warn_pct,      type: Integer,  desc: 'The percent at which to record and warn about plagiarism'
       optional :is_graded,                type: Boolean,  desc: 'Whether or not this task definition is a graded task'
       optional :max_quality_pts,          type: Integer,  desc: 'A range for quality points when quality is assessed'
       optional :assessment_enabled,       type: Boolean,  desc: 'Enable or disable assessment'
       optional :overseer_image_id,        type: Integer,  desc: 'The id of the Docker image name for overseer'
+      optional :moss_language,            type: String,   desc: 'The language to use for code similarity checks'
     end
   end
   put '/units/:unit_id/task_definitions/:id' do
@@ -136,17 +137,18 @@ class TaskDefinitionsApi < Grape::API
                                                 :is_graded,
                                                 :max_quality_pts,
                                                 :assessment_enabled,
-                                                :overseer_image_id
+                                                :overseer_image_id,
+                                                :moss_language,
+                                                :upload_requirements
                                               )
 
-    task_params[:upload_requirements] = JSON.parse(params[:task_def][:upload_requirements]) unless params[:task_def][:plagiarism_checks].nil?
-    task_params[:plagiarism_checks] = JSON.parse(params[:task_def][:plagiarism_checks]) unless params[:task_def][:plagiarism_checks].nil?
+    task_params[:upload_requirements] = params[:task_def][:upload_requirements].present? ? JSON.parse(params[:task_def][:upload_requirements]) : []
 
-    # Ensure changes to a TD defined as a "draft task definition" are validated
+    # Ensure changes to a TD defined as a 'draft task definition' are validated
     if unit.draft_task_definition_id == params[:id]
-      if params[:task_def][:upload_requirements]
-        requirements = params[:task_def][:upload_requirements]
-        if requirements.length != 1 || requirements[0]["type"] != "document"
+      if task_params[:upload_requirements]
+        requirements = task_params[:upload_requirements]
+        if requirements.length != 1 || requirements[0]['type'] != 'document'
           error!({ error: 'Task is marked as the draft learning summary task definition. A draft learning summary task can only contain a single document upload.' }, 403)
         end
       end
@@ -193,8 +195,8 @@ class TaskDefinitionsApi < Grape::API
       error!({ error: 'Not authorised to upload CSV of tasks' }, 403)
     end
 
-    unless params[:file].present?
-      error!({ error: "No file uploaded" }, 403)
+    if params[:file].blank?
+      error!({ error: 'No file uploaded' }, 403)
     end
 
     path = params[:file][:tempfile].path
@@ -253,8 +255,9 @@ class TaskDefinitionsApi < Grape::API
 
     file = params[:file]
 
-    unless FileHelper.accept_file(file, 'task sheet', 'document')
-      error!({ error: "'#{file[:name]}' is not a valid #{file[:type]} file" }, 403)
+    file_result = FileHelper.accept_file(file, 'task sheet', 'document')
+    unless file_result[:accepted]
+      error!({ error: "'#{file[:name]}' is not an acceptable format: #{file_result[:msg]}" }, 403)
     end
 
     # Actually import...
@@ -271,7 +274,7 @@ class TaskDefinitionsApi < Grape::API
     # This API accepts more than 2 files, file0 and file1 are just examples.
   end
   post '/units/:unit_id/task_definitions/:task_def_id/test_overseer_assessment' do
-    logger.info "********* - Starting overseer test"
+    logger.info '********* - Starting overseer test'
     return 'Overseer is not enabled' if !Doubtfire::Application.config.overseer_enabled
 
     unit = Unit.find(params[:unit_id])
@@ -296,7 +299,7 @@ class TaskDefinitionsApi < Grape::API
     # Copy files to be PDFed
     task.accept_submission(current_user, scoop_files(params, upload_reqs), current_user, self, nil, 'ready_for_feedback', nil, accepted_tii_eula: false)
 
-    logger.info "********* - about to perform overseer submission"
+    logger.info '********* - about to perform overseer submission'
     overseer_assessment = OverseerAssessment.create_for(task)
     if overseer_assessment.present?
       response = overseer_assessment.send_to_overseer
@@ -348,8 +351,8 @@ class TaskDefinitionsApi < Grape::API
 
     task_def = unit.task_definitions.find(params[:task_def_id])
 
-    unless params[:file].present?
-      error!({ error: "No file uploaded" }, 403)
+    if params[:file].blank?
+      error!({ error: 'No file uploaded' }, 403)
     end
 
     file_path = params[:file][:tempfile].path
@@ -435,8 +438,8 @@ class TaskDefinitionsApi < Grape::API
       error!({ error: 'Not authorised to upload tasks of unit' }, 403)
     end
 
-    unless params[:file].present?
-      error!({ error: "No file uploaded" }, 403)
+    if params[:file].blank?
+      error!({ error: 'No file uploaded' }, 403)
     end
 
     file = params[:file][:tempfile].path
@@ -454,7 +457,7 @@ class TaskDefinitionsApi < Grape::API
   end
   get '/units/:unit_id/task_definitions/:task_def_id/tasks' do
     unit = Unit.find(params[:unit_id])
-    unless authorise? current_user, unit, :provide_feedback
+    unless authorise? current_user, unit, :get_students
       error!({ error: 'Not authorised to access tasks for this unit' }, 403)
     end
 
@@ -545,18 +548,16 @@ class TaskDefinitionsApi < Grape::API
       path = task_def.task_sheet
       filename = "#{task_def.unit.code}-#{task_def.abbreviation}.pdf"
     else
-      path = Rails.root.join('public', 'resources', 'FileNotFound.pdf')
-      filename = "FileNotFound.pdf"
+      path = Rails.root.join('public/resources/FileNotFound.pdf')
+      filename = 'FileNotFound.pdf'
     end
 
     if params[:as_attachment]
       header['Content-Disposition'] = "attachment; filename=#{filename}"
-      header['Access-Control-Expose-Headers'] = 'Content-Disposition'
     end
 
     content_type 'application/pdf'
-    env['api.format'] = :binary
-    File.read(path)
+    stream_file path
   end
 
   desc 'Download the task resources'
@@ -577,14 +578,12 @@ class TaskDefinitionsApi < Grape::API
       content_type 'application/octet-stream'
       header['Content-Disposition'] = "attachment; filename=#{task_def.abbreviation}-resources.zip"
     else
-      path = Rails.root.join('public', 'resources', 'FileNotFound.pdf')
+      path = Rails.root.join('public/resources/FileNotFound.pdf')
       content_type 'application/pdf'
       header['Content-Disposition'] = 'attachment; filename=FileNotFound.pdf'
     end
-    header['Access-Control-Expose-Headers'] = 'Content-Disposition'
 
-    env['api.format'] = :binary
-    File.read(path)
+    stream_file path
   end
 
   desc 'Download the task assessment resources'
@@ -605,13 +604,11 @@ class TaskDefinitionsApi < Grape::API
       content_type 'application/octet-stream'
       header['Content-Disposition'] = "attachment; filename=#{task_def.abbreviation}-assessment-resources.zip"
     else
-      path = Rails.root.join('public', 'resources', 'FileNotFound.pdf')
+      path = Rails.root.join('public/resources/FileNotFound.pdf')
       content_type 'application/pdf'
       header['Content-Disposition'] = 'attachment; filename=FileNotFound.pdf'
     end
-    header['Access-Control-Expose-Headers'] = 'Content-Disposition'
 
-    env['api.format'] = :binary
-    File.read(path)
+    stream_file path
   end
 end

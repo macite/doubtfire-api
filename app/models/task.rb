@@ -49,6 +49,20 @@ class Task < ApplicationRecord
       :assess_extension,
       :request_extension
     ]
+    # What can admins do with tasks?
+    admin_role_permissions = [
+      :get,
+      :get_submission,
+      :view_plagiarism,
+      :get_discussion
+    ]
+    # What can auditors do with tasks?
+    auditor_role_permissions = [
+      :get,
+      :get_submission,
+      :view_plagiarism,
+      :get_discussion
+    ]
     # What can nil users do with tasks?
     nil_role_permissions = []
 
@@ -57,6 +71,8 @@ class Task < ApplicationRecord
       student: student_role_permissions,
       tutor: tutor_role_permissions,
       convenor: convenor_role_permissions,
+      admin: admin_role_permissions,
+      auditor: auditor_role_permissions,
       nil: nil_role_permissions
     }
   end
@@ -339,7 +355,7 @@ class Task < ApplicationRecord
   end
 
   def submitted_status?
-    ![:working_on_it, :not_started, :fix_and_resubmit, :redo, :need_help].include? status
+    [:working_on_it, :not_started, :fix_and_resubmit, :redo, :need_help].exclude? status
   end
 
   def fix_and_resubmit?
@@ -581,7 +597,7 @@ class Task < ApplicationRecord
   end
 
   def submitted_before_due?
-    return true unless due_date.present?
+    return true if due_date.blank?
 
     to_same_day_anywhere_on_earth(due_date) >= self.submission_date
   end
@@ -659,7 +675,7 @@ class Task < ApplicationRecord
 
   def individual_task_or_submitter_of_group_task?
     return true if !group_task? # its individual
-    return true unless group.present? # no group yet... so individual
+    return true if group.blank? # no group yet... so individual
 
     ensured_group_submission.submitted_by? self.project # return true if submitted by this project
   end
@@ -689,7 +705,8 @@ class Task < ApplicationRecord
     discussion.save!
 
     prompts.each_with_index do |prompt, index|
-      raise "Unknown comment attachment type" unless FileHelper.accept_file(prompt, "comment attachment discussion audio", "audio")
+      file_result = FileHelper.accept_file(prompt, "comment attachment discussion audio", "audio")
+      raise "Comment attachment is not an audio file" unless file_result[:accepted]
       raise "Error attaching uploaded file." unless discussion.add_prompt(prompt, index)
     end
 
@@ -707,11 +724,11 @@ class Task < ApplicationRecord
     comment.task = self
     comment.user = user
     comment.reply_to_id = reply_to_id
-    if FileHelper.accept_file(tempfile, "comment attachment audio test", "audio")
+    if FileHelper.accept_file(tempfile, "comment attachment audio test", "audio")[:accepted]
       comment.content_type = :audio
-    elsif FileHelper.accept_file(tempfile, "comment attachment image test", "image")
+    elsif FileHelper.accept_file(tempfile, "comment attachment image test", "image")[:accepted]
       comment.content_type = :image
-    elsif FileHelper.accept_file(tempfile, "comment attachment pdf", "document")
+    elsif FileHelper.accept_file(tempfile, "comment attachment pdf", "document")[:accepted]
       comment.content_type = :pdf
     else
       raise "Unknown comment attachment type"
@@ -967,11 +984,16 @@ class Task < ApplicationRecord
         logger.error "Error processing task #{log_details} - missing file #{file_req}"
         raise "File `#{file_req['name']}` missing from submission."
       else
-        result << { path: output_filename, type: file_req['type'] }
+        truncated = false
 
         if file_req['type'] == 'code'
           FileHelper.ensure_utf8_code(output_filename, is_retry)
+          extension = File.extname(output_filename)[1..-1]
+          unless extension.eql?("ipynb")
+            truncated = FileHelper.line_wrap(output_filename)
+          end
         end
+        result << { path: output_filename, type: file_req['type'], truncated: truncated }
 
         idx += 1 # next file index
       end
@@ -991,19 +1013,21 @@ class Task < ApplicationRecord
       @task = task
       @files = task.in_process_files_for_task(is_retry)
       @base_path = task.student_work_dir(:in_process, false)
-      @image_path = Rails.root.join('public', 'assets', 'images')
+      @image_path = Rails.root.join('public/assets/images')
       @institution_name = Doubtfire::Application.config.institution[:name]
       @doubtfire_product_name = Doubtfire::Application.config.institution[:product_name]
       @include_pax = !is_retry
     end
 
     def make_pdf
-      logger.debug "Running QPDF on all documents before rendering to repair any potential broken files."
+      logger.debug "Rendering PDF for a task, preprocessing attachments."
       @files.each do |f|
         if f[:type] == "document"
+          logger.debug "Running QPDF on #{f[:path]} before rendering to repair any potential broken files."
           FileHelper.qpdf(f[:path])
         end
       end
+      logger.debug "Preprocessing complete, rendering file."
       render_to_string(template: '/task/task_pdf', layout: true)
     end
   end
@@ -1024,10 +1048,12 @@ class Task < ApplicationRecord
     elsif ['xml'].include?(extn) then 'xml'
     elsif ['sql'].include?(extn) then 'sql'
     elsif ['vb'].include?(extn) then 'vbnet'
-    elsif ['txt', 'md', 'rmd', 'rpres', 'hdl', 'asm', 'jack', 'hack', 'tst', 'cmp', 'vm', 'sh', 'bat', 'dat', 'csv'].include?(extn) then 'text'
+    elsif ['txt', 'md', 'rmd', 'rpres', 'hdl', 'asm', 'jack', 'hack', 'tst', 'cmp', 'vm', 'sh', 'bat', 'dat', 'csv', 'pml'].include?(extn) then 'text'
     elsif ['tex', 'rnw'].include?(extn) then 'tex'
     elsif ['py'].include?(extn) then 'python'
     elsif ['r'].include?(extn) then 'r'
+    # requres unreleased pygments v2.18 https://pygments.org/docs/lexers/#pygments.lexers.c_like.PromelaLexer
+    # elsif ['pml'].include?(extn) then 'promela'
     else extn
     end
   end
@@ -1057,7 +1083,7 @@ class Task < ApplicationRecord
   end
 
   # Convert a submission to pdf - the source folder is the root folder in which the submission folder will be found (not the submission folder itself)
-  def convert_submission_to_pdf(source_folder = FileHelper.student_work_dir(:new))
+  def convert_submission_to_pdf(source_folder: FileHelper.student_work_dir(:new), log_to_stdout: true)
     return false unless move_files_to_in_process(source_folder)
 
     begin
@@ -1079,12 +1105,14 @@ class Task < ApplicationRecord
 
           log_file = e.message.scan(/\/.*\.log/).first
           # puts "log file is ... #{log_file}"
-          if log_file && File.exist?(log_file)
+          if log_to_stdout && log_file && File.exist?(log_file)
             # puts "exists"
             begin
+              # rubocop:disable Rails/Output
               puts "--- Latex Log ---\n"
               puts File.read(log_file)
               puts "---    End    ---\n\n"
+              # rubocop:enable Rails/Output
             rescue
             end
           end
@@ -1125,8 +1153,8 @@ class Task < ApplicationRecord
       return true
     rescue => e
       clear_in_process
-
       trigger_transition trigger: 'fix', by_user: project.tutor_for(task_definition)
+      add_text_comment project.tutor_for(task_definition), "**Automated Comment**: Something went wrong with your submission. Check the files and resubmit this task. #{e.message}"
       raise e
     end
   end
@@ -1187,6 +1215,11 @@ class Task < ApplicationRecord
   # Checks to make sure that the files match what we expect
   #
   def accept_submission(current_user, files, _student, ui, contributions, trigger, alignments, accepted_tii_eula: false)
+    # Ensure all of the files are present
+    if files.nil? || files.length != task_definition.number_of_uploaded_files
+      ui.error!({ 'error' => 'Some files are missing from the submission upload' }, 403)
+    end
+
     #
     # Ensure that each file in files has the following attributes:
     # id, name, filename, type, tempfile
@@ -1214,8 +1247,9 @@ class Task < ApplicationRecord
     #
     files.each_with_index do |file, index|
       logger.debug "Accepting submission (file #{index + 1} of #{files.length}) - checking file type for #{file["tempfile"].path}"
-      unless FileHelper.accept_file(file, file[:name], file[:type])
-        ui.error!({ 'error' => "'#{file[:name]}' is not a valid #{file[:type]} file" }, 403)
+      file_result = FileHelper.accept_file(file, file[:name], file[:type])
+      unless file_result[:accepted]
+        ui.error!({ 'error' => "'#{file[:name]}' is invalid: #{file_result[:msg]}" }, 403)
       end
 
       if File.size(file["tempfile"].path) > 10_000_000
@@ -1338,6 +1372,10 @@ class Task < ApplicationRecord
     end
     # we got to the end so no match
     nil
+  end
+
+  def archive_submission
+    FileUtils.rm_f(portfolio_evidence_path) if has_pdf
   end
 
   private

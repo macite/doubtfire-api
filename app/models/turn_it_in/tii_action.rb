@@ -33,6 +33,7 @@ class TiiAction < ApplicationRecord
 
   serialize :params, coder: JSON
   serialize :log, coder: JSON
+  attribute :log, default: -> { [] }
 
   def description
     'Generic Turnitin Action'
@@ -49,16 +50,22 @@ class TiiAction < ApplicationRecord
     self.error_code = nil if self.retry && error?
     self.custom_error_message = nil
 
-    self.log = [] if self.complete # reset log if complete... and performing again
+    self.log = [] if self.log.blank? || self.complete # reset log if complete... and performing again
 
     self.log << { date: Time.zone.now, message: "Started #{type}" }
     self.last_run = Time.zone.now
+
     self.retry = false # reset retry flag
-    self.log = [] if self.complete # reset log if complete... and performing again
     self.complete = false # reset complete flag
 
     result = run
     self.log << { date: Time.zone.now, message: "#{type} Ended" }
+
+    # Ensure log does not get too long!
+    if self.log.size > 25
+      self.log = self.log.last(25)
+    end
+
     save
 
     result
@@ -66,7 +73,7 @@ class TiiAction < ApplicationRecord
     save_and_log_custom_error e&.to_s
 
     if Rails.env.development? || Rails.env.test?
-      puts e.inspect
+      Rails.logger.debug e.inspect
     end
 
     nil
@@ -121,8 +128,14 @@ class TiiAction < ApplicationRecord
     error_code.present?
   end
 
+  def perform_retry
+    save_and_reschedule
+    perform_async
+  end
+
   def save_and_reschedule(reset_retry: true)
     self.retries = 0 if reset_retry
+    self.error_code = nil # reset error code
     self.retry = true
     save
   end

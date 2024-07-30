@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2024_03_31_032041) do
+ActiveRecord::Schema[7.1].define(version: 2024_07_01_221318) do
   create_table "activity_types", charset: "utf8", collation: "utf8_unicode_ci", force: :cascade do |t|
     t.string "name", null: false
     t.string "abbreviation", null: false
@@ -82,6 +82,7 @@ ActiveRecord::Schema[7.1].define(version: 2024_03_31_032041) do
     t.datetime "updated_at"
     t.integer "capacity"
     t.boolean "locked", default: false, null: false
+    t.index ["name", "unit_id"], name: "index_group_sets_on_name_and_unit_id", unique: true
     t.index ["unit_id"], name: "index_group_sets_on_unit_id"
   end
 
@@ -106,6 +107,7 @@ ActiveRecord::Schema[7.1].define(version: 2024_03_31_032041) do
     t.integer "capacity_adjustment", default: 0, null: false
     t.boolean "locked", default: false, null: false
     t.index ["group_set_id"], name: "index_groups_on_group_set_id"
+    t.index ["name", "group_set_id"], name: "index_groups_on_name_and_group_set_id", unique: true
     t.index ["tutorial_id"], name: "index_groups_on_tutorial_id"
   end
 
@@ -128,6 +130,7 @@ ActiveRecord::Schema[7.1].define(version: 2024_03_31_032041) do
     t.string "name"
     t.string "description", limit: 4096
     t.string "abbreviation"
+    t.index ["abbreviation", "unit_id"], name: "index_learning_outcomes_on_abbreviation_and_unit_id", unique: true
     t.index ["unit_id"], name: "index_learning_outcomes_on_unit_id"
   end
 
@@ -158,6 +161,8 @@ ActiveRecord::Schema[7.1].define(version: 2024_03_31_032041) do
     t.text "pulled_image_text"
     t.integer "pulled_image_status"
     t.datetime "last_pulled_date"
+    t.index ["name"], name: "index_overseer_images_on_name", unique: true
+    t.index ["tag"], name: "index_overseer_images_on_tag", unique: true
   end
 
   create_table "projects", charset: "utf8", collation: "utf8_unicode_ci", force: :cascade do |t|
@@ -237,7 +242,6 @@ ActiveRecord::Schema[7.1].define(version: 2024_03_31_032041) do
     t.string "upload_requirements", limit: 4096
     t.integer "target_grade", default: 0
     t.boolean "restrict_status_updates", default: false
-    t.string "plagiarism_checks", limit: 4096
     t.string "plagiarism_report_url"
     t.boolean "plagiarism_updated", default: false
     t.integer "plagiarism_warn_pct", default: 50
@@ -251,7 +255,9 @@ ActiveRecord::Schema[7.1].define(version: 2024_03_31_032041) do
     t.bigint "overseer_image_id"
     t.string "tii_group_id"
     t.string "moss_language"
+    t.index ["abbreviation", "unit_id"], name: "index_task_definitions_on_abbreviation_and_unit_id", unique: true
     t.index ["group_set_id"], name: "index_task_definitions_on_group_set_id"
+    t.index ["name", "unit_id"], name: "index_task_definitions_on_name_and_unit_id", unique: true
     t.index ["overseer_image_id"], name: "index_task_definitions_on_overseer_image_id"
     t.index ["tutorial_stream_id"], name: "index_task_definitions_on_tutorial_stream_id"
     t.index ["unit_id"], name: "index_task_definitions_on_unit_id"
@@ -356,15 +362,13 @@ ActiveRecord::Schema[7.1].define(version: 2024_03_31_032041) do
     t.boolean "retry", default: true, null: false
     t.integer "error_code"
     t.text "custom_error_message"
-    t.text "log", size: :long, default: "[]", collation: "utf8mb4_bin"
-    t.text "params", size: :long, default: "{}", collation: "utf8mb4_bin"
+    t.text "log"
+    t.string "params", limit: 1024, default: "{}"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.index ["complete"], name: "index_tii_actions_on_complete"
     t.index ["entity_type", "entity_id"], name: "index_tii_actions_on_entity"
     t.index ["retry"], name: "index_tii_actions_on_retry"
-    t.check_constraint "json_valid(`log`)", name: "log"
-    t.check_constraint "json_valid(`params`)", name: "params"
   end
 
   create_table "tii_group_attachments", charset: "utf8mb4", collation: "utf8mb4_general_ci", force: :cascade do |t|
@@ -434,6 +438,7 @@ ActiveRecord::Schema[7.1].define(version: 2024_03_31_032041) do
     t.integer "capacity", default: -1
     t.bigint "campus_id"
     t.bigint "tutorial_stream_id"
+    t.index ["abbreviation", "unit_id"], name: "index_tutorials_on_abbreviation_and_unit_id", unique: true
     t.index ["campus_id"], name: "index_tutorials_on_campus_id"
     t.index ["tutorial_stream_id"], name: "index_tutorials_on_tutorial_stream_id"
     t.index ["unit_id"], name: "index_tutorials_on_unit_id"
@@ -477,6 +482,7 @@ ActiveRecord::Schema[7.1].define(version: 2024_03_31_032041) do
     t.bigint "overseer_image_id"
     t.datetime "portfolio_auto_generation_date"
     t.string "tii_group_context_id"
+    t.boolean "archived", default: false
     t.index ["draft_task_definition_id"], name: "index_units_on_draft_task_definition_id"
     t.index ["main_convenor_id"], name: "index_units_on_main_convenor_id"
     t.index ["overseer_image_id"], name: "index_units_on_overseer_image_id"
@@ -512,8 +518,11 @@ ActiveRecord::Schema[7.1].define(version: 2024_03_31_032041) do
     t.string "tii_eula_version"
     t.datetime "tii_eula_date"
     t.boolean "tii_eula_version_confirmed", default: false, null: false
+    t.index ["email"], name: "index_users_on_email", unique: true
     t.index ["login_id"], name: "index_users_on_login_id", unique: true
     t.index ["role_id"], name: "index_users_on_role_id"
+    t.index ["student_id"], name: "index_users_on_student_id", unique: true
+    t.index ["username"], name: "index_users_on_username", unique: true
   end
 
   create_table "webcal_unit_exclusions", charset: "utf8", collation: "utf8_unicode_ci", force: :cascade do |t|

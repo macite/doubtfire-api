@@ -1,11 +1,6 @@
 require 'json'
 
 class TaskDefinition < ApplicationRecord
-  # Record triggers - before associations
-  after_update do |_td|
-    clear_related_plagiarism if plagiarism_checks.nil? && moss_similarities?
-  end
-
   before_destroy :delete_associated_files
 
   after_update :move_files_on_abbreviation_change, if: :saved_change_to_abbreviation?
@@ -24,11 +19,10 @@ class TaskDefinition < ApplicationRecord
   has_many :learning_outcome_task_links, dependent: :destroy # links to learning outcomes
   has_many :learning_outcomes, -> { where('learning_outcome_task_links.task_id is NULL') }, through: :learning_outcome_task_links # only link staff relations
 
-  has_many :tii_group_attachments, dependent: :destroy
+  has_many :tii_group_attachments, dependent: :destroy # destroy uploaded files to tii - after the tasks
   has_many :tii_actions, as: :entity, dependent: :destroy
 
   serialize :upload_requirements, coder: JSON
-  serialize :plagiarism_checks, coder: JSON
 
   # Model validations/constraints
   validates :name, uniqueness: { scope:  :unit_id } # task definition names within a unit must be unique
@@ -38,7 +32,6 @@ class TaskDefinition < ApplicationRecord
   validates :max_quality_pts, numericality: { greater_than_or_equal_to: 0, less_than_or_equal_to: 100, message: 'must be between 0 and 100' }
 
   validate :upload_requirements, :check_upload_requirements_format
-  validate :plagiarism_checks, :check_plagiarism_format
 
   validates :description, length: { maximum: 4095, allow_blank: true }
 
@@ -148,54 +141,6 @@ class TaskDefinition < ApplicationRecord
     overseer_image.tag
   end
 
-  def check_plagiarism_format()
-    return if plagiarism_checks.nil?
-
-    json_data = self.plagiarism_checks
-
-    # ensure we have a structure that is : [ { "key": "...", "type": "...", "pattern": "..."}, { ... } ]
-    unless json_data.class == Array
-      errors.add(:plagiarism_checks, 'is not in a valid format! Should be [ { "key": "...", "type": "...", "pattern": "..."}, { ... } ]. Did not contain array.')
-      return
-    end
-
-    # Loop through checks in the array
-    i = 0
-    for req in json_data do
-      # They must be json objects
-      unless req.class == Hash
-        errors.add(:plagiarism_checks, "is not in a valid format! Should be [ { \"key\": \"...\", \"type\": \"...\", \"pattern\": \"...\"}, { ... } ]. Array did not contain hashes for item #{i + 1}..")
-        return
-      end
-
-      # They must have these keys...
-      if (!req.key? 'key') || (!req.key? 'type') || (!req.key? 'pattern')
-        errors.add(:plagiarism_checks, "is not in a valid format! Should be [ { \"key\": \"...\", \"type\": \"...\", \"pattern\": \"...\"}, { ... } ]. Missing a key for item #{i + 1}.")
-        return
-      end
-
-      # Validate the type (MOSS now, Turnitin later)
-      if (!req['type'].match(/^moss /))
-        errors.add(:plagiarism_checks, "does not have a valid type.")
-        return
-      end
-
-      # Check patter to exclude any path separators
-      if (req['pattern'].match(/(\/)|([.][.])/))
-        errors.add(:plagiarism_checks, " pattern contains invalid characters.")
-        return
-      end
-
-      # Check only key, type, and pattern keys are present
-      if req.keys.length > 3
-        errors.add(:plagiarism_checks, "has additional values for item #{i + 1} --> #{req.keys.join(' ')}.")
-      end
-
-      # Move to the next check
-      i += 1
-    end
-  end
-
   def glob_for_upload_requirement(idx)
     "#{idx.to_s.rjust(3, '0')}-#{upload_requirements[idx]['type']}.*"
   end
@@ -229,6 +174,26 @@ class TaskDefinition < ApplicationRecord
       # Check keys only contain key, type, name, tii_check, and tii_pct
       unless req.keys.excluding('key', 'type', 'name', 'tii_check', 'tii_pct').empty?
         errors.add(:upload_requirements, "has additional values for item #{i + 1} --> #{req.keys.join(' ')}.")
+      end
+
+      # Check the name matches a valid filename format
+      unless req['name'].match?(/^[a-zA-Z0-9_\- \.]+$/)
+        errors.add(:upload_requirements, "the name for item #{i + 1} does not seem to be a valid filename --> #{req['name']}.")
+      end
+
+      # Check the type is either document or image or code
+      unless %w(document image code).include? req['type']
+        errors.add(:upload_requirements, "the type for item #{i + 1} is not valid --> #{req['type']}.")
+      end
+
+      # Check that tii check is a boolean
+      unless req['tii_check'].blank? || [true, false].include?(req['tii_check'])
+        errors.add(:upload_requirements, "the tii_check for item #{i + 1} is not a boolean --> #{req['tii_check']}.")
+      end
+
+      # Check that tii_pct is a non-negative number
+      unless req['tii_pct'].blank? || (req['tii_pct'].is_a?(Numeric) && req['tii_pct'] >= 0)
+        errors.add(:upload_requirements, "the tii_pct for item #{i + 1} is not a non-negative number --> #{req['tii_pct']}.")
       end
 
       i += 1
@@ -329,12 +294,11 @@ class TaskDefinition < ApplicationRecord
 
   def to_csv_row
     TaskDefinition.csv_columns
-                  .reject { |col| [:start_week, :start_day, :target_week, :target_day, :due_week, :due_day, :upload_requirements, :plagiarism_checks, :group_set, :tutorial_stream].include? col }
+                  .reject { |col| [:start_week, :start_day, :target_week, :target_day, :due_week, :due_day, :upload_requirements, :group_set, :tutorial_stream].include? col }
                   .map { |column| attributes[column.to_s] } +
       [
-        plagiarism_checks.to_json,
         group_set.nil? ? "" : group_set.name,
-        upload_requirements.to_s,
+        upload_requirements.to_json,
         start_week,
         start_day,
         target_week,
@@ -348,7 +312,7 @@ class TaskDefinition < ApplicationRecord
   end
 
   def self.csv_columns
-    [:name, :abbreviation, :description, :weighting, :target_grade, :restrict_status_updates, :max_quality_pts, :is_graded, :plagiarism_warn_pct, :plagiarism_checks, :group_set, :upload_requirements, :start_week, :start_day, :target_week, :target_day, :due_week, :due_day, :tutorial_stream]
+    [:name, :abbreviation, :description, :weighting, :target_grade, :restrict_status_updates, :max_quality_pts, :is_graded, :plagiarism_warn_pct, :group_set, :upload_requirements, :start_week, :start_day, :target_week, :target_day, :due_week, :due_day, :tutorial_stream]
   end
 
   def self.task_def_for_csv_row(unit, row)
@@ -357,7 +321,7 @@ class TaskDefinition < ApplicationRecord
     new_task = false
     abbreviation = row[:abbreviation].strip
     name = row[:name].strip
-    tutorial_stream = unit.tutorial_streams.find_by_abbr_or_name("#{row[:tutorial_stream]}".strip)
+    tutorial_stream = unit.tutorial_streams.find_by('abbreviation = :name OR name = :name', name: "#{row[:tutorial_stream]}".strip)
     target_date = unit.date_for_week_and_day row[:target_week].to_i, "#{row[:target_day]}".strip
     return [nil, false, "Unable to determine target date for #{abbreviation} -- need week number, and day short text eg. 'Wed'"] if target_date.nil?
 
@@ -395,7 +359,6 @@ class TaskDefinition < ApplicationRecord
     result.due_date                    = due_date
 
     result.plagiarism_warn_pct         = row[:plagiarism_warn_pct].to_i
-    result.plagiarism_checks           = JSON.parse(row[:plagiarism_checks]) unless row[:plagiarism_checks].nil?
 
     if row[:group_set].present?
       result.group_set = unit.group_sets.where(name: row[:group_set]).first
@@ -517,7 +480,7 @@ class TaskDefinition < ApplicationRecord
         if t.group.nil?
           result = false
         else
-          result = !seen_groups.include?(t.group)
+          result = seen_groups.exclude?(t.group)
           seen_groups << t.group if result
         end
         result

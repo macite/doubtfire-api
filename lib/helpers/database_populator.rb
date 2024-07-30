@@ -288,6 +288,7 @@ class DatabasePopulator
     # Define fixed user data here
     @user_data = {
       acain: { first_name: "Andrew", last_name: "Cain", nickname: "Macite", role_id: Role.admin_id },
+      aauditor: { first_name: "Auditor", last_name: "Auditor", nickname: "Auditor", role_id: Role.auditor_id },
       aconvenor: { first_name: "Clinton", last_name: "Woodward", nickname: "The Giant", role_id: Role.convenor_id },
       ajones: { first_name: "Allan", last_name: "Jones", nickname: "P-Jiddy", role_id: Role.admin_id },
       rwilson: { first_name: "Reuben", last_name: "Wilson", nickname: "Reubs", role_id: Role.convenor_id },
@@ -401,7 +402,7 @@ class DatabasePopulator
       if @user_cache.present?
         tutor = @user_cache[user_details[:user]]
       else
-        tutor = User.find_by_username(user_details[:user])
+        tutor = User.find_by(username: user_details[:user])
       end
 
       echo_line "----> Enrolling tutor #{tutor.name} with #{user_details[:num]} tutorials"
@@ -531,7 +532,7 @@ class DatabasePopulator
 
     pdf_path = task.final_pdf_path
     if pdf_path && !File.exist?(pdf_path)
-      FileUtils.ln_s(Rails.root.join('test_files', 'unit_files', 'sample-student-submission.pdf'), pdf_path)
+      FileUtils.ln_s(Rails.root.join('test_files/unit_files/sample-student-submission.pdf'), pdf_path)
     end
 
     task.portfolio_evidence_path = pdf_path
@@ -542,8 +543,8 @@ class DatabasePopulator
     portfolio_tmp_dir = project.portfolio_temp_path
     FileUtils.mkdir_p(portfolio_tmp_dir)
 
-    lsr_path = File.join(portfolio_tmp_dir, "000-document-LearningSummaryReport.pdf")
-    FileUtils.ln_s(Rails.root.join('test_files', 'unit_files', 'sample-learning-summary.pdf'), lsr_path) unless File.exist? lsr_path
+    lsr_path = File.join(portfolio_tmp_dir, '000-document-LearningSummaryReport.pdf')
+    FileUtils.ln_s(Rails.root.join('test_files/unit_files/sample-learning-summary.pdf'), lsr_path) unless File.exist? lsr_path
     project.compile_portfolio = true
     project.create_portfolio
   end
@@ -552,25 +553,43 @@ class DatabasePopulator
 
   # Output
   def echo *args
+    # rubocop:disable Rails/Output
     print(*args) if @echo
+    # rubocop:enable Rails/Output
   end
 
   def echo_line *args
+    # rubocop:disable Rails/Output
     puts(*args) if @echo
+    # rubocop:enable Rails/Output
   end
 
   #
   # Generates tasks for the given unit
   #
   def generate_tasks_for_unit(unit, unit_details)
-    if File.exist? Rails.root.join('test_files', "#{unit.code}-Tasks.csv")
-      echo "----> Importing tasks from CSV"
-      unit.import_tasks_from_csv File.open(Rails.root.join('test_files', "#{unit.code}-Tasks.csv"))
-      unit.import_task_files_from_zip Rails.root.join('test_files', "#{unit.code}-Tasks.zip")
+    csv_to_import = Rails.root.join('test_files', "#{unit.code}-Tasks.csv")
+    zip_to_import = Rails.root.join('test_files', "#{unit.code}-Tasks.zip")
+
+    if (File.exist? csv_to_import) && (File.exist? zip_to_import)
+      echo "----> CSV file found, importing tasks from #{csv_to_import} \n"
+      result = unit.import_tasks_from_csv(File.open(csv_to_import))
+      unless result[:errors].empty?
+        raise("----> Task import from CSV failed with the following errors: #{result[:errors]} \n")
+      end
+
+      echo "----> Importing task files from #{zip_to_import} \n"
+      result = unit.import_task_files_from_zip zip_to_import
+      unless result[:errors].empty?
+        raise("----> Task files import failed with the following errors: #{result[:errors]} \n")
+      end
+      unless result[:ignored].empty?
+        echo "----> Task files import ignored the following files: #{result[:ignored]} \n"
+      end
       return
     end
 
-    echo "----> Generating #{unit_details[:num_tasks]} tasks"
+    echo "----> Task csv and/or zip file not found, generating #{unit_details[:num_tasks]} tasks \n"
 
     unit_details[:num_tasks].times do |count|
       up_reqs = []
@@ -602,7 +621,7 @@ class DatabasePopulator
   #
   def generate_and_align_ilos_for_unit(unit, unit_details)
     # Create the ILOs
-    echo "----> Adding #{unit_details[:ilos]} ILOs"
+    echo "----> Adding #{unit_details[:ilos]} ILOs\n"
 
     if File.exist? Rails.root.join('test_files', "#{unit.code}-Outcomes.csv")
       unit.import_outcomes_from_csv File.open(Rails.root.join('test_files', "#{unit.code}-Outcomes.csv"))

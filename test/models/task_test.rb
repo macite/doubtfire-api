@@ -1,4 +1,5 @@
 require 'test_helper'
+require 'pdf-reader'
 
 #
 # Contains tests for Task model objects - not accessed via API
@@ -8,6 +9,10 @@ class TaskDefinitionTest < ActiveSupport::TestCase
   include TestHelpers::TestFileHelper
   include TestHelpers::AuthHelper
   include TestHelpers::JsonHelper
+
+  def error! msg, code
+    raise msg
+  end
 
   def app
     Rails.application
@@ -48,7 +53,7 @@ class TaskDefinitionTest < ActiveSupport::TestCase
     assert_equal 201, last_response.status, last_response_body
 
     task = project.task_for_task_definition(td)
-    assert task.convert_submission_to_pdf
+    assert task.convert_submission_to_pdf(log_to_stdout: false)
     path = task.zip_file_path_for_done_task
     assert path
     assert File.exist? path
@@ -135,7 +140,7 @@ class TaskDefinitionTest < ActiveSupport::TestCase
     assert_equal 201, last_response.status
 
     task = project.task_for_task_definition(td)
-    assert task.convert_submission_to_pdf
+    assert task.convert_submission_to_pdf(log_to_stdout: false)
     path = task.zip_file_path_for_done_task
     assert path
     assert File.exist? path
@@ -179,7 +184,7 @@ class TaskDefinitionTest < ActiveSupport::TestCase
 
     task = project.task_for_task_definition(td)
 
-    task.convert_submission_to_pdf
+    task.convert_submission_to_pdf(log_to_stdout: false)
 
     path = task.final_pdf_path
     assert File.exist? path
@@ -225,7 +230,7 @@ class TaskDefinitionTest < ActiveSupport::TestCase
     assert project_task.processing_pdf?
 
     # Generate pdf for task
-    assert project_task.convert_submission_to_pdf
+    assert project_task.convert_submission_to_pdf(log_to_stdout: false)
 
     # Check if pdf was copied over
     project.reload
@@ -282,7 +287,7 @@ class TaskDefinitionTest < ActiveSupport::TestCase
     assert project_task.processing_pdf?
 
     # Generate pdf for task
-    assert project_task.convert_submission_to_pdf
+    assert project_task.convert_submission_to_pdf(log_to_stdout: false)
 
     # Check if the file was moved to portfolio
     assert_not project.uses_draft_learning_summary
@@ -326,7 +331,345 @@ class TaskDefinitionTest < ActiveSupport::TestCase
     assert_equal 201, last_response.status, last_response_body
 
     task = project.task_for_task_definition(td)
-    assert task.convert_submission_to_pdf
+    assert task.convert_submission_to_pdf(log_to_stdout: false)
+    path = task.zip_file_path_for_done_task
+    assert path
+    assert File.exist? path
+    assert File.exist? task.final_pdf_path
+
+    # Test if latex math was rendered properly
+    reader = PDF::Reader.new(task.final_pdf_path)
+    assert reader.pages.last.text.include?("BMI: bmi ="), reader.pages.last.text
+
+    # ensure the notice is not included when the notebook doesn't have long lines source code cells
+    # and no errors
+    reader.pages.each do |page|
+      assert_not page.text.include? 'The rest of this line has been truncated by the system to improve readability.'
+      assert_not page.text.include?('ERROR when parsing'), page.text
+    end
+
+    # test line wrapping in jupynotex
+    data_to_post = with_file('test_files/submissions/long.ipynb', 'application/json', data_to_post)
+
+    post "/api/projects/#{project.id}/task_def_id/#{td.id}/submission", data_to_post
+
+    assert_equal 201, last_response.status, last_response_body
+
+    # test submission generation
+    assert task.convert_submission_to_pdf(log_to_stdout: false)
+    path = task.zip_file_path_for_done_task
+    assert path
+    assert File.exist? path
+    assert File.exist? task.final_pdf_path
+
+    # ensure the notice is included when the notebook has long line in source code cells
+    reader = PDF::Reader.new(task.final_pdf_path)
+    assert reader.pages[1].text.gsub(/\s+/, " ").include? "[The rest of this line has been truncated by the system to improve readability.]"
+
+    # test excessive long raw data
+    data_to_post = with_file('test_files/submissions/many_lines.ipynb', 'application/json', data_to_post)
+    post "/api/projects/#{project.id}/task_def_id/#{td.id}/submission", data_to_post
+
+    assert_equal 201, last_response.status, last_response_body
+
+    # test submission generation
+    assert task.convert_submission_to_pdf(log_to_stdout: false)
+    path = task.zip_file_path_for_done_task
+    assert path
+    assert File.exist? path
+    assert File.exist? task.final_pdf_path
+
+    # ensure the notice is included when the notebook has long line in source code cells
+    reader = PDF::Reader.new(task.final_pdf_path)
+
+    assert_equal 4, reader.pages.count
+
+    td.destroy
+    assert_not File.exist? path
+    unit.destroy!
+  end
+
+  def test_code_submission_with_long_lines
+    unit = FactoryBot.create(:unit, student_count: 1, task_count: 0)
+    td = TaskDefinition.new({
+        unit_id: unit.id,
+        tutorial_stream: unit.tutorial_streams.first,
+        name: 'Task with super ling lines in code submission',
+        description: 'Code task',
+        weighting: 4,
+        target_grade: 0,
+        start_date: unit.start_date + 1.week,
+        target_date: unit.start_date + 2.weeks,
+        abbreviation: 'Long',
+        restrict_status_updates: false,
+        upload_requirements: [ { "key" => 'file0', "name" => 'long.py', "type" => 'code' } ],
+        plagiarism_warn_pct: 0.8,
+        is_graded: false,
+        max_quality_pts: 0
+      })
+    td.save!
+
+    data_to_post = {
+      trigger: 'ready_for_feedback'
+    }
+
+    data_to_post = with_file('test_files/submissions/long.py', 'application/json', data_to_post)
+
+    project = unit.active_projects.first
+
+    add_auth_header_for user: unit.main_convenor_user
+
+    post "/api/projects/#{project.id}/task_def_id/#{td.id}/submission", data_to_post
+
+    assert_equal 201, last_response.status, last_response_body
+
+    # test submission generation
+    task = project.task_for_task_definition(td)
+    assert task.convert_submission_to_pdf(log_to_stdout: false)
+    path = task.zip_file_path_for_done_task
+    assert path
+    assert File.exist? path
+    assert File.exist? task.final_pdf_path
+
+    # ensure the notice is included when rendered files are truncated
+    reader = PDF::Reader.new(task.final_pdf_path)
+    assert reader.pages[1].text.include? "This file has additional line breaks applied"
+
+    # submit a normal file and ensure the notice is not included in the PDF
+    data_to_post = {
+      trigger: 'ready_for_feedback'
+    }
+
+    data_to_post = with_file('test_files/submissions/normal.py', 'application/json', data_to_post)
+    project = unit.active_projects.first
+    add_auth_header_for user: unit.main_convenor_user
+    post "/api/projects/#{project.id}/task_def_id/#{td.id}/submission", data_to_post
+    assert_equal 201, last_response.status, last_response_body
+
+    # test submission generation
+    task = project.task_for_task_definition(td)
+    assert task.convert_submission_to_pdf(log_to_stdout: false)
+    path = task.zip_file_path_for_done_task
+    assert path
+    assert File.exist? path
+    assert File.exist? task.final_pdf_path
+
+    # ensure the notice is not included
+    reader = PDF::Reader.new(task.final_pdf_path)
+    assert_not reader.pages[1].text.include? "This file has additional line breaks applied"
+
+    td.destroy
+    assert_not File.exist? path
+    unit.destroy!
+  end
+
+  def test_code_submission_with_long_lines
+    unit = FactoryBot.create(:unit, student_count: 1, task_count: 0)
+    td = TaskDefinition.new({
+        unit_id: unit.id,
+        tutorial_stream: unit.tutorial_streams.first,
+        name: 'Task with super ling lines in code submission',
+        description: 'Code task',
+        weighting: 4,
+        target_grade: 0,
+        start_date: unit.start_date + 1.week,
+        target_date: unit.start_date + 2.weeks,
+        abbreviation: 'Long',
+        restrict_status_updates: false,
+        upload_requirements: [ { "key" => 'file0', "name" => 'long.py', "type" => 'code' } ],
+        plagiarism_warn_pct: 0.8,
+        is_graded: false,
+        max_quality_pts: 0
+      })
+    td.save!
+
+    data_to_post = {
+      trigger: 'ready_for_feedback'
+    }
+
+    data_to_post = with_file('test_files/submissions/long.py', 'application/json', data_to_post)
+
+    project = unit.active_projects.first
+
+    add_auth_header_for user: unit.main_convenor_user
+
+    post "/api/projects/#{project.id}/task_def_id/#{td.id}/submission", data_to_post
+
+    assert_equal 201, last_response.status, last_response_body
+
+    # test submission generation
+    task = project.task_for_task_definition(td)
+    assert task.convert_submission_to_pdf(log_to_stdout: false)
+    path = task.zip_file_path_for_done_task
+    assert path
+    assert File.exist? path
+    assert File.exist? task.final_pdf_path
+
+    # ensure the notice is included when rendered files are truncated
+    reader = PDF::Reader.new(task.final_pdf_path)
+    assert reader.pages[1].text.include? "This file has additional line breaks applied"
+
+    # submit a normal file and ensure the notice is not included in the PDF
+    data_to_post = {
+      trigger: 'ready_for_feedback'
+    }
+
+    data_to_post = with_file('test_files/submissions/normal.py', 'application/json', data_to_post)
+    project = unit.active_projects.first
+    add_auth_header_for user: unit.main_convenor_user
+    post "/api/projects/#{project.id}/task_def_id/#{td.id}/submission", data_to_post
+    assert_equal 201, last_response.status, last_response_body
+
+    # test submission generation
+    task = project.task_for_task_definition(td)
+    assert task.convert_submission_to_pdf(log_to_stdout: false)
+    path = task.zip_file_path_for_done_task
+    assert path
+    assert File.exist? path
+    assert File.exist? task.final_pdf_path
+
+    # ensure the notice is not included
+    reader = PDF::Reader.new(task.final_pdf_path)
+    assert_not reader.pages[1].text.include? "This file has additional line breaks applied"
+
+    td.destroy
+    assert_not File.exist? path
+    unit.destroy!
+  end
+
+  def test_code_submission_with_long_lines
+    unit = FactoryBot.create(:unit, student_count: 1, task_count: 0)
+    td = TaskDefinition.new({
+        unit_id: unit.id,
+        tutorial_stream: unit.tutorial_streams.first,
+        name: 'Task with super ling lines in code submission',
+        description: 'Code task',
+        weighting: 4,
+        target_grade: 0,
+        start_date: unit.start_date + 1.week,
+        target_date: unit.start_date + 2.weeks,
+        abbreviation: 'Long',
+        restrict_status_updates: false,
+        upload_requirements: [ { "key" => 'file0', "name" => 'long.py', "type" => 'code' } ],
+        plagiarism_warn_pct: 0.8,
+        is_graded: false,
+        max_quality_pts: 0
+      })
+    td.save!
+
+    data_to_post = {
+      trigger: 'ready_for_feedback'
+    }
+
+    data_to_post = with_file('test_files/submissions/long.py', 'application/json', data_to_post)
+
+    project = unit.active_projects.first
+
+    add_auth_header_for user: unit.main_convenor_user
+
+    post "/api/projects/#{project.id}/task_def_id/#{td.id}/submission", data_to_post
+
+    assert_equal 201, last_response.status, last_response_body
+
+    # test submission generation
+    task = project.task_for_task_definition(td)
+    assert task.convert_submission_to_pdf(log_to_stdout: false)
+    path = task.zip_file_path_for_done_task
+    assert path
+    assert File.exist? path
+    assert File.exist? task.final_pdf_path
+
+    # ensure the notice is included when rendered files are truncated
+    reader = PDF::Reader.new(task.final_pdf_path)
+    assert reader.pages[1].text.include? "This file has additional line breaks applied"
+
+    # submit a normal file and ensure the notice is not included in the PDF
+    data_to_post = {
+      trigger: 'ready_for_feedback'
+    }
+
+    data_to_post = with_file('test_files/submissions/normal.py', 'application/json', data_to_post)
+    project = unit.active_projects.first
+    add_auth_header_for user: unit.main_convenor_user
+    post "/api/projects/#{project.id}/task_def_id/#{td.id}/submission", data_to_post
+    assert_equal 201, last_response.status, last_response_body
+
+    # test submission generation
+    task = project.task_for_task_definition(td)
+    assert task.convert_submission_to_pdf(log_to_stdout: false)
+    path = task.zip_file_path_for_done_task
+    assert path
+    assert File.exist? path
+    assert File.exist? task.final_pdf_path
+
+    # ensure the notice is not included
+    reader = PDF::Reader.new(task.final_pdf_path)
+    assert_not reader.pages[1].text.include? "This file has additional line breaks applied"
+
+    td.destroy
+    assert_not File.exist? path
+    unit.destroy!
+  end
+
+  def test_pdf_validation_on_submit
+    unit = FactoryBot.create(:unit, student_count: 1, task_count: 0)
+    td = TaskDefinition.new({
+        unit_id: unit.id,
+        tutorial_stream: unit.tutorial_streams.first,
+        name: 'PDF Test Task',
+        description: 'Test task',
+        weighting: 4,
+        target_grade: 0,
+        start_date: unit.start_date + 1.week,
+        target_date: unit.start_date + 2.weeks,
+        abbreviation: 'PDFTestTask',
+        restrict_status_updates: false,
+        upload_requirements: [ { "key" => 'file0', "name" => 'A pdf file', "type" => 'document' } ],
+        plagiarism_warn_pct: 0.8,
+        is_graded: false,
+        max_quality_pts: 0
+      })
+    td.save!
+
+    data_to_post = {
+      trigger: 'ready_for_feedback'
+    }
+
+    # submit an encrypted (but valid) PDF file and ensure it's rejected immediately
+    data_to_post = with_file('test_files/submissions/encrypted.pdf', 'application/json', data_to_post)
+
+    project = unit.active_projects.first
+
+    add_auth_header_for user: unit.main_convenor_user
+
+    post "/api/projects/#{project.id}/task_def_id/#{td.id}/submission", data_to_post
+
+    assert_equal 403, last_response.status, last_response_body
+
+    # submit a corrupted PDF file and ensure it's rejected immediately
+    data_to_post = with_file('test_files/submissions/corrupted.pdf', 'application/json', data_to_post)
+
+    project = unit.active_projects.first
+
+    add_auth_header_for user: unit.main_convenor_user
+
+    post "/api/projects/#{project.id}/task_def_id/#{td.id}/submission", data_to_post
+
+    assert_equal 403, last_response.status, last_response_body
+
+    # submit a valid PDF file and ensure it's accepted
+    data_to_post = with_file('test_files/submissions/valid.pdf', 'application/json', data_to_post)
+
+    project = unit.active_projects.first
+
+    add_auth_header_for user: unit.main_convenor_user
+
+    post "/api/projects/#{project.id}/task_def_id/#{td.id}/submission", data_to_post
+
+    assert_equal 201, last_response.status, last_response_body
+
+    task = project.task_for_task_definition(td)
+    assert task.convert_submission_to_pdf(log_to_stdout: false)
     path = task.zip_file_path_for_done_task
     assert path
     assert File.exist? path
@@ -337,4 +680,175 @@ class TaskDefinitionTest < ActiveSupport::TestCase
     unit.destroy!
   end
 
+  def test_pdf_creation_fails_on_invalid_pdf
+    unit = FactoryBot.create(:unit, student_count: 1, task_count: 0)
+    td = TaskDefinition.new({
+        unit_id: unit.id,
+        tutorial_stream: unit.tutorial_streams.first,
+        name: 'PDF Test Task',
+        description: 'Test task',
+        weighting: 4,
+        target_grade: 0,
+        start_date: unit.start_date + 1.week,
+        target_date: unit.start_date + 2.weeks,
+        abbreviation: 'PDFTestTask',
+        restrict_status_updates: false,
+        upload_requirements: [ { "key" => 'file0', "name" => 'A pdf file', "type" => 'code' } ],
+        plagiarism_warn_pct: 0.8,
+        is_graded: false,
+        max_quality_pts: 0
+      })
+    td.save!
+
+    data_to_post = {
+      trigger: 'ready_for_feedback'
+    }
+
+    project = unit.active_projects.first
+
+    task = project.task_for_task_definition(td)
+
+    folder = FileHelper.student_work_dir(:new, task)
+
+    # Copy the file in
+    FileUtils.cp(Rails.root.join('test_files/submissions/corrupted.pdf'), "#{folder}/001-code.cs")
+
+    begin
+      assert_not task.convert_submission_to_pdf(log_to_stdout: false)
+    rescue StandardError => e
+      task.reload
+
+      assert_equal 2, task.comments.count
+      assert task.comments.last.comment.starts_with?('**Automated Comment**:')
+      assert task.comments.last.comment.include?(e.message.to_s)
+
+      td.destroy
+      unit.destroy!
+    end
+  end
+
+  def test_accept_files_checks_they_all_exist
+    project = FactoryBot.create(:project)
+    unit = project.unit
+    user = project.student
+    convenor = unit.main_convenor_user
+    task_definition = unit.task_definitions.first
+
+    task_definition.upload_requirements = [
+      {
+        "key" => 'file0',
+        "name" => 'Document 1',
+        "type" => 'document'
+      },
+      {
+        "key" => 'file1',
+        "name" => 'Document 2',
+        "type" => 'document'
+      },
+      {
+        "key" => 'file2',
+        "name" => 'Code 1',
+        "type" => 'code'
+      },
+      {
+        "key" => 'file3',
+        "name" => 'Document 3',
+        "type" => 'document'
+      },
+      {
+        "key" => 'file4',
+        "name" => 'Document 4',
+        "type" => 'document'
+      }
+    ]
+
+    # Saving task def
+    task_definition.save!
+
+    # Test that the task def is setup correctly
+    assert_equal 5, task_definition.number_of_uploaded_files
+
+    # Now... lets upload a submission
+    task = project.task_for_task_definition(task_definition)
+
+    # Create a submission - but no files!
+    begin
+      task.accept_submission user, [], user, self, nil, 'ready_for_feedback', nil
+      assert false, 'Should have raised an error with no files submitted'
+    rescue StandardError => e
+      assert_equal :not_started, task.status
+    end
+
+    # Create a submission
+    task.accept_submission user, [
+      {
+        id: 'file0',
+        name: 'Document 1',
+        type: 'document',
+        filename: 'file0.pdf',
+        "tempfile" => File.new(test_file_path('submissions/1.2P.pdf'))
+      },
+      {
+        id: 'file1',
+        name: 'Document 2',
+        type: 'document',
+        filename: 'file1.pdf',
+        "tempfile" => File.new(test_file_path('submissions/1.2P.pdf'))
+      },
+      {
+        id: 'file2',
+        name: 'Code 1',
+        type: 'code',
+        filename: 'code.cs',
+        "tempfile" => File.new(test_file_path('submissions/program.cs'))
+      },
+      {
+        id: 'file3',
+        name: 'Document 3',
+        type: 'document',
+        filename: 'file3.pdf',
+        "tempfile" => File.new(test_file_path('submissions/1.2P.pdf'))
+      },
+      {
+        id: 'file4',
+        name: 'Document 4',
+        type: 'document',
+        filename: 'file4.pdf',
+        "tempfile" => File.new(test_file_path('submissions/1.2P.pdf'))
+      }
+    ], user, self, nil, 'ready_for_feedback', nil, accepted_tii_eula: true
+
+    assert_equal :ready_for_feedback, task.status
+
+    task_definition.upload_requirements = []
+    task_definition.save!
+
+    task.task_status = TaskStatus.not_started
+    task.save!
+    task.reload
+
+    # Now... lets upload a submission with no files
+    task.accept_submission user, [], user, self, nil, 'ready_for_feedback', nil
+    assert_equal :ready_for_feedback, task.status
+
+    task.task_status = TaskStatus.not_started
+    task.save!
+
+    # Now... lets upload a submission with too many files
+    begin
+      task.accept_submission user,
+        [
+          {
+            id: 'file0',
+            name: 'Document 1',
+            type: 'document',
+            filename: 'file0.pdf',
+            "tempfile" => File.new(test_file_path('submissions/1.2P.pdf'))
+          }
+        ], user, self, nil, 'ready_for_feedback', nil
+      assert false, 'Should have raised an error with too many files submitted'
+    rescue StandardError => e
+      assert_equal :not_started, task.status
+    end
+  end
 end

@@ -66,7 +66,7 @@ class UnitRole < ApplicationRecord
   end
 
   def self.tasks_to_review(user)
-    Tutorial.find_by_user(user)
+    Tutorial.find_by(user: user)
             .map(&:projects)
             .flatten
             .map(&:tasks)
@@ -145,14 +145,18 @@ class UnitRole < ApplicationRecord
   def send_weekly_status_email(summary_stats)
     return unless user.receive_feedback_notifications
 
-    NotificationsMailer.weekly_staff_summary(self, summary_stats).deliver_now
+    begin
+      NotificationsMailer.weekly_staff_summary(self, summary_stats).deliver_now
+    rescue StandardError => e
+      Rails.logger.error "Failed to send weekly staff summary email to #{user.email} - #{e.message}"
+    end
   end
 
   def ensure_valid_user_for_role
     if is_convenor?
-      errors.add :user, 'must have a role that id able to administer units (request admin to adjust user role)' unless user.has_convenor_capability?
+      errors.add :user, 'must have a role that is able to administer units (request admin to adjust user role)' unless user.has_convenor_capability?
     else
-      errors.add :user, 'must have a role that id able to teach units (request admin to adjust user role)' unless user.has_tutor_capability?
+      errors.add :user, 'must have a role that is able to teach units (request admin to adjust user role)' unless user.has_tutor_capability?
     end
   end
 

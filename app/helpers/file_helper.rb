@@ -1,6 +1,9 @@
+require 'English'
 require 'zip'
 require 'tmpdir'
 require 'open3'
+require 'shellwords'
+require 'pdf-reader'
 
 module FileHelper
   extend LogHelper
@@ -8,10 +11,10 @@ module FileHelper
   extend MimeCheckHelpers
 
   def known_extension?(extn)
-    allow_extensions = %w(pdf ps csv xls xlsx pas cpp c cs csv h hpp java py js html coffee scss yaml yml xml json ts r rb rmd rnw rhtml rpres tex vb sql txt md jack hack asm hdl tst out cmp vm sh bat dat ipynb css png bmp tiff tif jpeg jpg gif zip gz tar wav ogg mp3 mp4 webm aac pcm aiff flac wma alac)
+    allow_extensions = %w(pdf ps csv xls xlsx pas cpp c cs csv h hpp java py js html coffee scss yaml yml xml json ts r rb rmd rnw rhtml rpres tex vb sql txt md jack hack asm hdl tst out cmp vm sh bat dat ipynb css png bmp tiff tif jpeg jpg gif zip gz tar wav ogg mp3 mp4 webm aac pcm aiff flac wma alac pml)
 
     # Allow empty or nil extensions for blobs otherwise check that it matches the allowed list
-    extn.nil? || extn.empty? || allow_extensions.include?(extn)
+    extn.blank? || allow_extensions.include?(extn)
   end
 
   #
@@ -19,34 +22,76 @@ module FileHelper
   # - file is passed the file uploaded to Doubtfire (a hash with all relevant data about the file)
   #
   def accept_file(file, name, kind)
-    valid = true
-
     case kind
     when 'image'
-      accept = ['image/png', 'image/gif', 'image/bmp', 'image/tiff', 'image/jpeg', 'image/x-ms-bmp']
+      mime_allow_list = ['image/png', 'image/gif', 'image/bmp', 'image/tiff', 'image/jpeg', 'image/x-ms-bmp']
     when 'code'
-      accept = ['text/x-pascal', 'text/x-c', 'text/x-c++', 'application/csv', 'text/plain', 'text/', 'application/javascript', 'text/html',
+      mime_allow_list = ['text/x-pascal', 'text/x-c', 'text/x-c++', 'application/csv', 'text/plain', 'text/', 'application/javascript', 'text/html',
                 'text/css', 'text/x-ruby', 'text/coffeescript', 'text/x-scss', 'application/json', 'text/xml', 'application/xml',
                 'text/x-yaml', 'application/xml', 'text/x-typescript', 'text/x-vhdl', 'text/x-asm', 'text/x-jack', 'application/x-httpd-php',
                 'application/tst', 'text/x-cmp', 'text/x-vm', 'application/x-sh', 'application/x-bat', 'application/dat', 'application/x-wine-extension-ini']
     when 'document'
-      accept = [ # -- one day"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        # --"application/msword",
-        'application/pdf'
-      ]
-      valid = pdf_valid? file["tempfile"].path
+      mime_allow_list = [ 'application/pdf' ]
     when 'audio'
-      accept = ['audio/', 'video/webm', 'application/ogg', 'application/octet-stream']
+      mime_allow_list = ['audio/', 'video/webm', 'application/ogg', 'application/octet-stream']
     when 'comment_attachment'
-      accept = ['audio/', 'video/webm', 'application/ogg', 'image/', 'application/pdf', 'application/octet-stream']
+      mime_allow_list = ['audio/', 'video/webm', 'application/ogg', 'image/', 'application/pdf', 'application/octet-stream']
     when 'video'
-      accept = ['video/mp4']
+      mime_allow_list = ['video/mp4']
     else
       logger.error "Unknown type '#{kind}' provided for '#{name}'"
-      return false
     end
 
-    mime_in_list?(file["tempfile"].path, accept) && valid && FileHelper.known_extension?(File.extname(file["tempfile"]).downcase[1..])
+    extension_check = FileHelper.known_extension?(File.extname(file["tempfile"]).downcase[1..])
+    unless extension_check
+      msg = "invalid file extension."
+      logger.debug "File extension check failed"
+      return {
+        accepted: false,
+        msg: msg
+      }
+    end
+
+    mime_check = mime_in_list?(file["tempfile"].path, mime_allow_list)
+    unless mime_check
+      msg = "invalid file MIME type, file is likely corrupted."
+      logger.debug "File MIME check failed"
+      return {
+        accepted: false,
+        msg: msg
+      }
+    end
+
+    # Extra checks for PDF documents
+    if kind == "document"
+      pdf_validation_result = validate_pdf(file["tempfile"].path)
+
+      if pdf_validation_result[:encrypted]
+        msg = "PDF file is encrypted, encrypted files are not supported."
+        logger.debug "PDF file is encrypted"
+        return {
+          accepted: false,
+          msg: msg
+        }
+      end
+
+      unless pdf_validation_result[:valid]
+        msg = "PDF file is corrupted."
+        logger.debug "PDF file is corrupted"
+        return {
+          accepted: false,
+          msg: msg
+        }
+      end
+    end
+
+    logger.debug "Uploaded file is accepted"
+
+    # All checks are done
+    {
+      accepted: true,
+      msg: "success"
+    }
   end
 
   #
@@ -166,14 +211,18 @@ module FileHelper
     dst
   end
 
-  def unit_dir(unit, create = true)
+  def dir_for_unit_code_and_id(unit_code, unit_id, create = true)
     file_server = Doubtfire::Application.config.student_work_dir
     dst = "#{file_server}/" # trust the server config and passed in type for paths
-    dst << sanitized_path("#{unit.code}-#{unit.id}") << '/'
+    dst << sanitized_path("#{unit_code}-#{unit_id}") << '/'
 
-    FileUtils.mkdir_p dst if create && (!Dir.exist? dst)
+    FileUtils.mkdir_p dst if create && !Dir.exist?(dst)
 
     dst
+  end
+
+  def unit_dir(unit, create = true)
+    dir_for_unit_code_and_id(unit.code, unit.id, create)
   end
 
   def unit_portfolio_dir(unit, create = true)
@@ -312,7 +361,13 @@ module FileHelper
   # - only_before = date for files to move (only if retain from is true)
   def move_files(from_path, to_path, retain_from = false, only_before = nil)
     # move into the new dir - and mv files to the in_process_dir
-    pwd = FileUtils.pwd
+    begin
+      pwd = FileUtils.pwd
+    rescue
+      # if no pwd, reset to the root
+      pwd = Rails.root
+    end
+
     begin
       FileUtils.mkdir_p(to_path)
       Dir.chdir(from_path)
@@ -339,21 +394,25 @@ module FileHelper
   #
   # Tests if a PDF is valid / corrupt
   #
-  def pdf_valid?(filename)
-    # Scan last 1024 bytes for the EOF mark
-    return false unless File.exist? filename
-
-    File.open(filename) do |f|
-      f.seek -4096, IO::SEEK_END unless f.size <= 4096
-      f.read.include? '%%EOF'
+  def validate_pdf(filename)
+    return { valid: false, encrypted: false } unless File.exist? filename
+    begin
+      reader = PDF::Reader.new(filename)
+    rescue PDF::Reader::MalformedPDFError => e
+      logger.error "Submitted PDF file #{filename} is invalid: #{e.message}"
+      return { valid: false, encrypted: false }
+    rescue PDF::Reader::EncryptedPDFError => e
+      logger.error "Submitted PDF file #{filename} is encrypted: #{e.message}"
+      return { valid: false, encrypted: true }
     end
+    { valid: true, encrypted: false }
   end
 
   #
   # Copy a PDF into place
   #
   def copy_pdf(file, dest_path)
-    if pdf_valid? file
+    if validate_pdf(file)[:valid]
       compress_pdf(file)
       FileUtils.cp file, dest_path
       true
@@ -529,6 +588,42 @@ module FileHelper
     "#{task_submission_identifier_path(type, task)}/#{timestamp.to_s}"
   end
 
+  # Apply line wrapping to a given file, returns true when line wrapping is necessary.
+  # The default 160-character limit is about two lines in the rendered PDF.
+  # There is also a hard limit of 1000 characters, anything longer will be truncated to 1000 characters.
+  def line_wrap(path, width: 160)
+    hard_limit = 1000
+    dir = File.dirname(path)
+    basename = File.basename(path)
+    temp_file = Tempfile.new('truncated_file')
+    output = Tempfile.new('wrapped_file')
+    begin
+      logger.debug "Applying hard column width limit of #{hard_limit} to #{path}"
+      system("cut -c-#{hard_limit} #{path.shellescape} > #{temp_file.path}", exception: true)
+      logger.debug "Applying line wrapping on #{temp_file.path} to limit line width to #{width}"
+      system("fold --width #{width} #{temp_file.path} > #{output.path}", exception: true)
+      # compare input and output files, replace the output with a symlink if they are identical
+      system "diff #{path.shellescape} #{output.path} > /dev/null"
+      case $CHILD_STATUS.exitstatus
+      when 0
+        logger.debug "File #{path} does not contain lines longer than #{width}"
+        false
+      when 1
+        logger.debug "File #{path} contains lines longer than #{width}, line wrapping has been applied"
+        File.copy_stream(output.path, path.shellescape)
+        true
+      else
+        raise "Error comparing original and line-wrapped files!"
+      end
+    rescue => e
+      logger.error "Failed to apply line wrapping on #{path}. Rescued with error:\n\t#{e.message}"
+    end
+  ensure
+    temp_file.close
+    temp_file.unlink
+    output.close
+    output.unlink
+  end
   # Export functions as module functions
   module_function :accept_file
   module_function :sanitized_path
@@ -539,6 +634,7 @@ module FileHelper
   module_function :student_group_work_dir
   module_function :student_work_dir
   module_function :student_work_root
+  module_function :dir_for_unit_code_and_id
   module_function :unit_dir
   module_function :unit_portfolio_dir
   module_function :student_portfolio_dir
@@ -550,7 +646,7 @@ module FileHelper
   module_function :compress_pdf
   module_function :qpdf
   module_function :move_files
-  module_function :pdf_valid?
+  module_function :validate_pdf
   module_function :copy_pdf
   module_function :read_file_to_str
   module_function :path_to_plagarism_html
@@ -572,4 +668,5 @@ module FileHelper
   module_function :task_submission_identifier_path_with_timestamp
   module_function :known_extension?
   module_function :pages_in_pdf
+  module_function :line_wrap
 end

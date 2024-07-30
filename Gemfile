@@ -22,8 +22,12 @@ group :development, :test do
   gem 'listen'
   gem 'rails_best_practices'
   gem 'rubocop'
+  gem 'rubocop-factory_bot'
   gem 'rubocop-faker'
+  gem 'rubocop-minitest'
+  gem 'rubocop-performance'
   gem 'rubocop-rails'
+  gem 'ruby-lsp'
   gem 'simplecov', require: false
   gem 'solargraph'
   gem 'sprockets-rails'
@@ -78,7 +82,7 @@ gem 'grape-swagger-rails'
 # Miscellaneous
 gem 'bunny-pub-sub', '0.5.2'
 gem 'ci_reporter'
-gem 'dotenv-rails'
+gem 'dotenv'
 gem 'rack-cors', require: 'rack/cors'
 gem 'require_all', '>=1.3.3'
 
@@ -102,3 +106,9 @@ gem 'sidekiq-cron'
 
 # Redis for sidekiq, caching, and action cable (eventually)
 gem 'redis'
+
+# shellwords for safely escaping strings
+gem 'shellwords'
+
+# PDF reader for validating PDF file submissions
+gem 'pdf-reader'

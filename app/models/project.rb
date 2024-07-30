@@ -22,13 +22,12 @@ class Project < ApplicationRecord
 
   # has_one :user, through: :student
   has_many :tasks, dependent: :destroy # Destroying a project will also nuke all of its tasks
-
   has_many :group_memberships, dependent: :destroy
+  has_many :tutorial_enrolments, dependent: :destroy
+
   has_many :groups, -> { where('group_memberships.active = :value', value: true) }, through: :group_memberships
   has_many :task_engagements, through: :tasks
   has_many :comments, through: :tasks
-  has_many :tutorial_enrolments, dependent: :destroy
-
   has_many :learning_outcome_task_links, through: :tasks
 
   # Callbacks - methods called are private
@@ -63,8 +62,16 @@ class Project < ApplicationRecord
       :assess,
       :change_campus
     ]
-    # What can convenors do with projects?
-    convenor_role_permissions = []
+    # What can admins do with projects?
+    admin_role_permissions = [
+      :get,
+      :get_submission
+    ]
+    # What can auditors do with projects?
+    auditor_role_permissions = [
+      :get,
+      :get_submission
+    ]
     # What can nil users do with projects?
     nil_role_permissions = []
 
@@ -72,6 +79,8 @@ class Project < ApplicationRecord
     {
       student: student_role_permissions,
       tutor: tutor_role_permissions,
+      admin: admin_role_permissions,
+      auditor: auditor_role_permissions,
       nil: nil_role_permissions
     }
   end
@@ -215,13 +224,13 @@ class Project < ApplicationRecord
     (tutorial.present? and tutorial.tutor.present?) ? tutorial.tutor : main_convenor_user
   end
 
-  def main_convenor_user
-    unit.main_convenor_user
-  end
+  delegate :main_convenor_user, to: :unit
 
   def user_role(user)
     if user == student then :student
     elsif user.present? && unit.tutors.where(id: user.id).count != 0 then :tutor
+    elsif user.present? && user.role.id == Role.admin_id then :admin
+    elsif user.present? && user.role.id == Role.auditor_id then :auditor
     else nil
     end
   end
@@ -648,7 +657,18 @@ class Project < ApplicationRecord
     return unless student.receive_feedback_notifications
     return if portfolio_exists? && !middle_of_unit
 
-    NotificationsMailer.weekly_student_summary(self, summary_stats, did_revert_to_pass).deliver_now
+    begin
+      NotificationsMailer.weekly_student_summary(self, summary_stats, did_revert_to_pass).deliver_now
+    rescue StandardError => e
+      logger.error "Failed to send weekly status email for project #{id}!\n#{e.message}"
+    end
+  end
+
+  def archive_submissions(out)
+    out.puts " - Archiving submissions for project #{id}"
+    tasks.each(&:archive_submission)
+
+    FileUtils.rm_f(portfolio_path) if portfolio_available
   end
 
   private
@@ -668,7 +688,7 @@ class Project < ApplicationRecord
     group_memberships.each do |gm|
       next unless gm.active
 
-      if !gm.valid? || gm.group.beyond_capacity?
+      if gm.invalid? || gm.group.beyond_capacity?
         gm.update(active: false)
       end
     end

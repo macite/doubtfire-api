@@ -4,6 +4,8 @@
 class TiiActionUploadSubmission < TiiAction
   delegate :status_sym, :status, :submission_id, :submitted_by_user, :task, :idx, :similarity_pdf_id, :similarity_pdf_path, :filename, to: :entity
 
+  NO_USER_ACCEPTED_EULA_ERROR = 'None of the student, tutor, or unit lead have accepted the EULA for Turnitin'.freeze
+
   def description
     "Upload #{self.filename} for #{self.task.student.username} from #{self.task.task_definition.abbreviation} (#{self.status} - #{self.next_step})"
   end
@@ -163,7 +165,7 @@ class TiiActionUploadSubmission < TiiAction
     data = tii_submission_data
 
     # If we don't have data, then we can't create a submission - fail as no one accepted EULA
-    return false unless data.present?
+    return false if data.blank?
 
     exec_tca_call "TiiSubmission #{entity.id} - fetching id" do
       # Check to ensure it is a new upload
@@ -199,8 +201,9 @@ class TiiActionUploadSubmission < TiiAction
 
     # Setup the task owners
     if task.group_task?
-      result.owner = task.group_submission.submitter_task.student.username
-      result.metadata.owners = task.group_submission.tasks.map { |t| @instance.tii_user_for(t.student) }
+      grp = Task.group
+      result.owner = "group-#{grp.id}"
+      result.metadata.owners = [TurnItIn.tii_user_for_group(task.group_submission.submitter_task.student.email)]
     else
       result.owner = task.student.username
       result.metadata.owners = [TurnItIn.tii_user_for(task.student)]
@@ -213,7 +216,7 @@ class TiiActionUploadSubmission < TiiAction
     result.submitter = submitted_by_user.username
 
     unless submitted_by_user.accepted_tii_eula? || (params.key?("accepted_tii_eula") && params["accepted_tii_eula"])
-      save_and_log_custom_error "None of the student, tutor, or unit lead have accepted the EULA for Turnitin"
+      save_and_log_custom_error NO_USER_ACCEPTED_EULA_ERROR
       return nil
     end
 
@@ -334,7 +337,7 @@ class TiiActionUploadSubmission < TiiAction
   #
   # @return [TCAClient::SimilarityMetadata] the similarity report status
   def fetch_tii_similarity_status
-    return nil unless submission_id.present?
+    return nil if submission_id.blank?
 
     exec_tca_call "TiiSubmission #{entity.id} - fetching similarity report status" do
       # Get Similarity Report Status
@@ -381,7 +384,7 @@ class TiiActionUploadSubmission < TiiAction
   #
   # @param [Boolean] skip_check - skip the check to see if the report is ready
   def download_similarity_report_pdf(skip_check: false)
-    return false unless similarity_pdf_id.present?
+    return false if similarity_pdf_id.blank?
     return false unless skip_check || fetch_tii_similarity_pdf_status == 'SUCCESS'
 
     error_codes = [
@@ -442,4 +445,26 @@ class TiiActionUploadSubmission < TiiAction
       result.status
     end
   end
+
+  # If this submission is not progressing due to a user not accepting the EULA, then
+  # check if the user has accepted the EULA now and retry
+  def attempt_retry_on_no_eula
+    if self.retry == false && status_sym == :created && error_message == NO_USER_ACCEPTED_EULA_ERROR
+      # If the student has now submitted the eula...
+      unless entity.submitted_by.accepted_tii_eula?
+        # Try reassigning the submitted_by so that it checks for tutor
+        # or convenor eula
+        entity.submitted_by = entity.submitted_by_user
+      end
+
+      # If we can submit from someone...
+      if submitted_by_user.accepted_tii_eula?
+        # Save any changes to the entity
+        entity.save
+        save_and_reschedule
+      end
+
+    end
+  end
+
 end

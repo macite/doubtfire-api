@@ -10,10 +10,10 @@
 \tcbuselibrary{skins}
 
 \newcommand{\jupynotex}[2][-]{
-    \input|"python3 jupynotex.py #2 #1"
+    \input|"python3 jupynotex.py '#2' '#1' '95'"
 }
 
-\usepackage[fencedCode,hashEnumerators]{markdown}
+\usepackage[fencedCode,hashEnumerators,pipeTables,texMathDollars]{markdown}
 
 \usepackage{luatextra}
 \defaultfontfeatures{Ligatures=TeX}
@@ -33,12 +33,16 @@
   filecolor=black,
   urlcolor=blue,
   citecolor=black}
-
+<%
+if @include_pax
+%>
 \usepackage{newpax}
 \newpaxsetup{usefileattributes=true, addannots=true}
 \directlua{require("newpax")}
 <%= yield :preamble_newpax %>
-
+<%
+end
+%>
 \epstopdfDeclareGraphicsRule{.tif}{png}{.png}{convert #1 \OutputFile}
 \AppendGraphicsExtensions{.tif}
 \epstopdfDeclareGraphicsRule{.tiff}{png}{.png}{convert #1 \OutputFile}

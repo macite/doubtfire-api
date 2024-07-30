@@ -102,7 +102,7 @@ class AuthenticationApi < Grape::API
       # Lookup using email otherwise and set login_id
       # Otherwise create new
       user = User.find_by(login_id: login_id) ||
-             User.find_by_username(email[/(.*)@/, 1]) ||
+             User.find_by(username: email[/(.*)@/, 1]) ||
              User.find_by(email: email) ||
              User.find_or_create_by(login_id: login_id) do |new_user|
                role_response = attributes.fetch(/role/) || attributes.fetch(/userRole/)
@@ -141,9 +141,11 @@ class AuthenticationApi < Grape::API
       logger.info "Redirecting #{user.username} from #{request.ip}"
 
       # Must redirect to the front-end after sign in
-      protocol = Rails.env.development? ? 'http' : 'https'
-      host = Rails.env.development? ? "#{protocol}://localhost:3000" : Doubtfire::Application.config.institution[:host]
-      host = "#{protocol}://#{host}" unless host.starts_with?('http')
+      host = Doubtfire::Application.config.institution[:host]
+      unless host.starts_with?('http')
+        protocol = Rails.env.development? ? 'http' : 'https'
+        host = "#{protocol}://#{host}"
+      end
       redirect "#{host}/#/sign_in?authToken=#{onetime_token.authentication_token}&username=#{user.username}"
     end
   end
@@ -175,7 +177,7 @@ class AuthenticationApi < Grape::API
       # Lookup using email otherwise and set login_id
       # Otherwise create new
       user = User.find_by(login_id: login_id) ||
-             User.find_by_username(email[/(.*)@/, 1]) ||
+             User.find_by(username: email[/(.*)@/, 1]) ||
              User.find_by(email: email) ||
              User.find_or_create_by(login_id: login_id) do |new_user|
                role = Role.aaf_affiliation_to_role_id(attrs[:edupersonscopedaffiliation])
@@ -216,9 +218,11 @@ class AuthenticationApi < Grape::API
       logger.info "Redirecting #{user.username} from #{request.ip}"
 
       # Must redirect to the front-end after sign in
-      protocol = Rails.env.development? ? 'http' : 'https'
-      host = Rails.env.development? ? "#{protocol}://localhost:3000" : Doubtfire::Application.config.institution[:host]
-      host = "#{protocol}://#{host}" unless host.starts_with?('http')
+      host = Doubtfire::Application.config.institution[:host]
+      unless host.starts_with?('http')
+        protocol = Rails.env.development? ? 'http' : 'https'
+        host = "#{protocol}://#{host}"
+      end
       redirect "#{host}/#/sign_in?authToken=#{onetime_token.authentication_token}&username=#{user.username}"
     end
   end
@@ -238,7 +242,7 @@ class AuthenticationApi < Grape::API
 
       # Authenticate that the token is okay
       if authenticated?
-        user = User.find_by_username(params[:username])
+        user = User.find_by(username: params[:username])
         token = user.token_for_text?(params[:auth_token]) unless user.nil?
         error!({ error: 'Invalid token.' }, 404) if token.nil?
 
@@ -319,7 +323,7 @@ class AuthenticationApi < Grape::API
     logger.info "Update token #{token_param} from #{request.ip} for #{user_param}"
 
     # Find user
-    user = User.find_by_username(user_param)
+    user = User.find_by(username: user_param)
     token = user.token_for_text?(token_param) unless user.nil?
     remember = params[:remember] || false
 
@@ -354,7 +358,7 @@ class AuthenticationApi < Grape::API
          }
        }
   delete '/auth' do
-    user = User.find_by_username(headers['username'] || headers['Username'])
+    user = User.find_by(username: headers['username'] || headers['Username'])
     token = user.token_for_text?(headers['auth-token'] || headers['Auth-Token']) unless user.nil?
 
     if token.present?

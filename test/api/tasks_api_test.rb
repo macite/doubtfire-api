@@ -295,12 +295,12 @@ class TasksApiTest < ActiveSupport::TestCase
 
     # Student tries to pin task
     post "/api/tasks/#{task.id}/pin"
-    assert_equal last_response.status, 403
+    assert_equal 403, last_response.status
 
     add_auth_header_for user: admin
     # Admin tries to pin task
     post "/api/tasks/#{task.id}/pin"
-    assert_equal last_response.status, 403
+    assert_equal 403, last_response.status
   end
 
   def test_convenors_tutors_can_pin_tasks_of_their_units_only
@@ -400,7 +400,7 @@ class TasksApiTest < ActiveSupport::TestCase
     assert_equal 201, last_response.status, last_response_body
 
     task = project.task_for_task_definition(td)
-    task.convert_submission_to_pdf
+    task.convert_submission_to_pdf(log_to_stdout: false)
     assert File.exist? task.final_pdf_path
 
     td.destroy
